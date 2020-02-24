@@ -27,3 +27,18 @@ int main() {
 	}
 
 }
+
+
+//this class hold all the ray info 
+class ray {
+	ray() {}
+	ray(const Vector3f &a, const Vector3f &b) {}
+
+	Vector3f origin() const { return A; }
+	Vector3f direction() const { return B; }
+	Vector3f point_at_T(float t) const { return ( A + t * B); }
+
+	Vector3f A;
+	Vector3f B;
+
+};
