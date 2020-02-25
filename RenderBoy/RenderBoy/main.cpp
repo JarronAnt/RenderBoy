@@ -20,7 +20,27 @@ public:
 
 };
 
+bool hitSphere(const Vector3f &center, float radius, const ray &r) {
+
+	//get the vector from the ray to the center of the sphere 
+	Vector3f OC = r.origin() - center;
+	//get the abc components of the qudratic equation 
+	float a = r.direction().dot(r.direction());
+	float b = 2.0 * OC.dot(r.direction());
+	float c = OC.dot(OC) - radius * radius;
+	//calculate the discriminate if discrim > 0 we have a real soloution 
+	// to the equation of the line hitting the sphere 
+	float discrim = b * b - 4 * a*c;
+
+	return (discrim > 0);
+}
 Vector3f colour( const ray &r) {
+
+	//if the ray hit the sphere at the pixel color it blue
+	if (hitSphere(Vector3f(0, 0, -1), 0.5, r)) {
+		return Vector3f(0, 0, 1);
+	}
+
 	Vector3f unitDirection = r.direction().normalized();
 	//this turns the y vector from -1 to 1 into 0 to 1 
 	float t = 0.5*(unitDirection[1] + 1.0);
