@@ -4,6 +4,33 @@
 
 using namespace Eigen;
 
+//this class hold all the ray info 
+class ray {
+public:
+	ray(const Vector3f &a, const Vector3f &b) { A = a; B = b; }
+
+	Vector3f A;
+	Vector3f B;
+
+	Vector3f origin() const { return A; }
+	Vector3f direction() const { return B; }
+	Vector3f point_at_T(float t) const { return (A + t * B); }
+
+	
+
+};
+
+Vector3f colour( const ray &r) {
+	Vector3f unitDirection = r.direction().normalized();
+	//this turns the y vector from -1 to 1 into 0 to 1 
+	float t = 0.5*(unitDirection[1] + 1.0);
+
+	//this is a linear interprotation (lerp)
+	//formula is blendvalue = (1-t)*startColor + t*endColor
+	return (1.0 - t)*Vector3f(1.0, 1.0, 1.0) + t * Vector3f(0.5, 0.2, 1.0);
+	
+}
+
 int main() {
 
 	int nx = 200;
@@ -13,12 +40,24 @@ int main() {
 	std::ofstream image;
 	image.open("render.ppm");
 	image << "P3\n" << nx << " " << ny << "\n255\n";
+
+	//set the image size info
+	Vector3f lowerLeft(-2.0, -1.0, -1.0);
+	Vector3f horizontal(4.0, 0.0, 0.0);
+	Vector3f vertical(0.0, 2.0, 0.0);
+	Vector3f origin(0.0, 0.0, 0.0);
+
 	//draw the ppm image 
 	for (int j = ny - 1; j >= 0; j--) {
 		for (int i = 0; i < nx; i++) {
 
-			Vector3f col(float(i) / float(nx), float(j) / float(ny), 0.45);
-
+			float u = float(i) / float(nx);
+			float v = float(j) / float(ny);
+			//create a ray to each pixel 
+			ray r(origin, lowerLeft + u * horizontal + v * vertical);
+			//calculate a color for that pixel 
+			Vector3f col = colour(r);
+			//set the color 
 			int ir = int(255.99*col[0]);
 			int ig = int(255.99*col[1]);
 			int ib = int(255.99*col[2]);
@@ -29,16 +68,3 @@ int main() {
 }
 
 
-//this class hold all the ray info 
-class ray {
-	ray() {}
-	ray(const Vector3f &a, const Vector3f &b) {}
-
-	Vector3f origin() const { return A; }
-	Vector3f direction() const { return B; }
-	Vector3f point_at_T(float t) const { return ( A + t * B); }
-
-	Vector3f A;
-	Vector3f B;
-
-};
