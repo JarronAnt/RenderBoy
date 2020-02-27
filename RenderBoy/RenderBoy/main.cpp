@@ -20,8 +20,29 @@ public:
 
 };
 
-float hitSphere(const Vector3f &center, float radius, const ray &r) {
+//hittable object info
+struct hitRecord {
+	float t;
+	Vector3f p;
+	Vector3f normal;
+};
+//base class for all hittable object
+class hittable {
+public:
+	virtual bool hit(const ray &r, float tMin, float tMax, hitRecord &rec) const = 0;
+};
 
+//sphere class 
+class sphere : public hittable {
+public:
+	sphere() {}
+	sphere(Vector3f cen, float r) :center(cen), radius(r) {};
+	virtual bool hit(const ray &r, float tMin, float tMax, hitRecord &rec) const;
+	Vector3f center;
+	float radius;
+};
+//hit function for the sphere
+bool sphere::hit(const ray &r, float tMin, float tMax, hitRecord &rec) const{
 	//get the vector from the ray to the center of the sphere 
 	Vector3f OC = r.origin() - center;
 	//get the abc components of the qudratic equation 
@@ -32,34 +53,68 @@ float hitSphere(const Vector3f &center, float radius, const ray &r) {
 	// to the equation of the line hitting the sphere 
 	float discrim = b * b - 4 * a*c;
 
-	//return the acutal hit point 
-	if (discrim < 0) {
-		return (-1.0);
+	if (discrim > 0) {
+		float temp = (-b - sqrt(discrim)) / a;
+		if (temp < tMax && temp > tMin) {
+			rec.t = temp;
+			rec.p = r.point_at_T(rec.t);
+			rec.normal = (rec.p - center) / radius;
+			return true;
+		}
+		temp = (-b + sqrt(discrim)) / a;
+		if (temp < tMax && temp > tMin) {
+			rec.t = temp;
+			rec.p = r.point_at_T(rec.t);
+			rec.normal = (rec.p - center) / radius;
+			return true;
+		}
+	}
+	return false;
+}
+
+//a list of all hittable objects
+class hitList : public hittable {
+public:
+	hitList() {}
+	//this is an object that contains a list of hittable objects 
+	hitList(hittable **l, int n) { list = l; listSize = n; }
+	//hit function for objects in the list
+	virtual bool hit(
+		const ray& r, float tmin, float tmax, hitRecord& rec) const;
+	//double pointer = list 
+	hittable **list;
+	int listSize;
+};
+//hit function for the whole list
+bool hitList::hit(const ray& r, float t_min, float t_max,
+	hitRecord& rec) const {
+
+	hitRecord temp_rec;
+	bool hitAnything = false;
+	double closest_so_far = t_max;
+	//loop through the list and see if we hit anything 
+	for (int i = 0; i < listSize; i++) {
+		if (list[i]->hit(r, t_min, closest_so_far, temp_rec)) {
+			hitAnything = true;
+			closest_so_far = temp_rec.t;
+			rec = temp_rec;
+		}
+	}
+	return hitAnything;
+}
+
+//color in our scene 
+Vector3f colour( const ray &r, hittable *world) {
+
+	hitRecord hr;
+	if (world->hit(r, 0.0, FLT_MAX, hr)) {
+		return 0.5*Vector3f(hr.normal[0] + 1, hr.normal[1] + 1, hr.normal[2] + 1);
 	}
 	else {
-		return (-b - sqrt(discrim)) / (2.0*a);
+		Vector3f unitVec = r.direction().normalized();
+		float t = 0.5*(unitVec[1] + 1.0);
+		return (1.0 - t)*Vector3f(1.0, 1.0, 1.0) + t * Vector3f(0.5, 0.7, 1.0);
 	}
-
-}
-Vector3f colour( const ray &r) {
-
-	//if the ray hit the sphere at the pixel color it blue
-	float t = hitSphere(Vector3f(0, 0, -1), 0.5, r);
-
-	if (t > 0.0) {
-		//compute the normal at point t 
-		Vector3f N = (r.point_at_T(t) - Vector3f(0, 0, -1)).normalized();
-		//generate a colour based on the normal 
-		return 0.5*Vector3f(N[0] + 1, N[1] + 1, N[2] + 1);
-	}
-		
-
-	Vector3f unitDirection = r.direction().normalized();
-	//this turns the y vector from -1 to 1 into 0 to 1 
-	t = 0.5*(unitDirection[1] + 1.0);
-	//this is a linear interprotation (lerp)
-	//formula is blendvalue = (1-t)*startColor + t*endColor
-	return (1.0 - t)*Vector3f(1.0, 1.0, 1.0) + t * Vector3f(0.5, 0.2, 1.0);
 	
 }
 
@@ -79,16 +134,28 @@ int main() {
 	Vector3f vertical(0.0, 2.0, 0.0);
 	Vector3f origin(0.0, 0.0, 0.0);
 
+	//create a list of hittable objects 
+	hittable *list[2];
+	//populate that list 
+	list[0] = new sphere(Vector3f(0, 0, -1), 0.5);
+	list[1] = new sphere(Vector3f(0, -100.5, -1), 100);
+	//create the new hit list 
+	hittable *world = new hitList(list, 2);
+
 	//draw the ppm image 
 	for (int j = ny - 1; j >= 0; j--) {
 		for (int i = 0; i < nx; i++) {
 
 			float u = float(i) / float(nx);
 			float v = float(j) / float(ny);
+
 			//create a ray to each pixel 
 			ray r(origin, lowerLeft + u * horizontal + v * vertical);
+
+			Vector3f p = r.point_at_T(2.0);
+
 			//calculate a color for that pixel 
-			Vector3f col = colour(r);
+			Vector3f col = colour(r,world);
 			//set the color 
 			int ir = int(255.99*col[0]);
 			int ig = int(255.99*col[1]);
