@@ -47,11 +47,11 @@ bool sphere::hit(const ray &r, float tMin, float tMax, hitRecord &rec) const{
 	Vector3f OC = r.origin() - center;
 	//get the abc components of the qudratic equation 
 	float a = r.direction().dot(r.direction());
-	float b = 2.0 * OC.dot(r.direction());
+	float b = OC.dot(r.direction());
 	float c = OC.dot(OC) - radius * radius;
 	//calculate the discriminate if discrim > 0 we have a real soloution 
 	// to the equation of the line hitting the sphere 
-	float discrim = b * b - 4 * a*c;
+	float discrim = b * b -  a*c;
 
 	if (discrim > 0) {
 		float temp = (-b - sqrt(discrim)) / a;
