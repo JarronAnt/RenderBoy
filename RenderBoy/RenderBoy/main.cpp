@@ -4,7 +4,7 @@ This is my first serious attempt at a raytracer so bare with the code.
 Terrible coding practices are in place cause im lazy
 using the eigen3 library for all linear algebra operations cause I cant 
 be botherd to create my own vector class 
-preformance isnt an object concern in this raytracer so if it compiles slow....that's unfortuante  
+preformance isnt an object of concern in this raytracer so if it compiles slow....that's unfortuante  
 this raytracer doesn't leverage the gpu at all its purely cpu based.
 */
 
@@ -96,9 +96,9 @@ public:
 	hittable **list;
 	int listSize;
 };
+
 //hit function for the whole list
-bool hitList::hit(const ray& r, float t_min, float t_max,
-	hitRecord& rec) const {
+bool hitList::hit(const ray& r, float t_min, float t_max,hitRecord& rec) const {
 
 	hitRecord temp_rec;
 	bool hitAnything = false;
@@ -152,21 +152,16 @@ public:
 
 
 int main() {
-
+	//screen x,y and sample sizes in terms of pixels
 	int nx = 200;
 	int ny = 100;
+	//the higher the ns value the better the antialiasing but slows down the program 
 	int ns = 50;
 
 	//open the file 
 	std::ofstream image;
 	image.open("render.ppm");
 	image << "P3\n" << nx << " " << ny << "\n255\n";
-
-	//set the image size info
-	Vector3f lowerLeft(-2.0, -1.0, -1.0);
-	Vector3f horizontal(4.0, 0.0, 0.0);
-	Vector3f vertical(0.0, 2.0, 0.0);
-	Vector3f origin(0.0, 0.0, 0.0);
 
 	//create a list of hittable objects 
 	hittable *list[2];
