@@ -1,6 +1,17 @@
+/*
+READ:
+This is my first serious attempt at a raytracer so bare with the code.
+Terrible coding practices are in place cause im lazy
+using the eigen3 library for all linear algebra operations cause I cant 
+be botherd to create my own vector class 
+preformance isnt an object concern in this raytracer so if it compiles slow....that's unfortuante  
+this raytracer doesn't leverage the gpu at all its purely cpu based.
+*/
+
 #include <Eigen/Dense>
 #include <iostream>
 #include <fstream>
+#include <cstdlib>
 
 using namespace Eigen;
 
@@ -118,10 +129,33 @@ Vector3f colour( const ray &r, hittable *world) {
 	
 }
 
+//rand double generator for antialiasing 
+double randomDouble() {
+	return rand() / (RAND_MAX + 1.0);
+}
+
+//abstraction of the camera class 
+class camera {
+public:
+	camera() { 
+		lowerLeft = Vector3f(-2.0, -1.0, -1.0);
+		horizontal = Vector3f(4.0, 0.0, 0.0);
+		vertical = Vector3f(0.0, 2.0, 0.0);
+		origin = Vector3f(0.0, 0.0, 0.0);
+	}
+	ray getRay(float u, float v) {
+		return ray(origin, lowerLeft + u * horizontal + v * vertical - origin);
+	}
+
+	Vector3f lowerLeft, horizontal, vertical, origin;
+};
+
+
 int main() {
 
 	int nx = 200;
 	int ny = 100;
+	int ns = 50;
 
 	//open the file 
 	std::ofstream image;
@@ -141,21 +175,25 @@ int main() {
 	list[1] = new sphere(Vector3f(0, -100.5, -1), 100);
 	//create the new hit list 
 	hittable *world = new hitList(list, 2);
-
+	camera cam;
 	//draw the ppm image 
 	for (int j = ny - 1; j >= 0; j--) {
 		for (int i = 0; i < nx; i++) {
-
-			float u = float(i) / float(nx);
-			float v = float(j) / float(ny);
-
-			//create a ray to each pixel 
-			ray r(origin, lowerLeft + u * horizontal + v * vertical);
-
-			Vector3f p = r.point_at_T(2.0);
-
-			//calculate a color for that pixel 
-			Vector3f col = colour(r,world);
+			//set color to black  for each pixel initally 
+			Vector3f col(0, 0, 0);
+			//this loop samples the colour in the pixel
+			for (int  s = 0; s < ns; s++)
+			{
+				//get the u,v coords for the ray
+				float u = float(i + randomDouble()) / float(nx);
+				float v = float(j + randomDouble()) / float(ny);
+				//get the ray based on above coords
+				ray r = cam.getRay(u, v);
+				//add all the colors in the pixel 
+				col += colour(r, world);
+			}
+			//take the average of the pixel color
+			col /= ns;
 			//set the color 
 			int ir = int(255.99*col[0]);
 			int ig = int(255.99*col[1]);
