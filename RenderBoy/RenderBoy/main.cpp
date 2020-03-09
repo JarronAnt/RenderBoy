@@ -12,6 +12,7 @@ this raytracer doesn't leverage the gpu at all its purely cpu based.
 #include <iostream>
 #include <fstream>
 #include <cstdlib>
+#include <cmath>
 
 using namespace Eigen;
 
@@ -114,12 +115,30 @@ bool hitList::hit(const ray& r, float t_min, float t_max,hitRecord& rec) const {
 	return hitAnything;
 }
 
+//rand double generator for antialiasing 
+double randomDouble() {
+	return rand() / (RAND_MAX + 1.0);
+}
+
+//this function gives us a random point in the sphere for diffuse lighting
+Vector3f randInSphere() {
+	Vector3f p;
+	do {
+
+		p = 2.0*Vector3f(randomDouble(), randomDouble(), randomDouble()) - Vector3f(1, 1, 1);
+
+	} while ((p[0] * p[0] + p[1] * p[1] + p[2] * p[2]) >= 1.0);
+	return p;
+}
+
 //color in our scene 
 Vector3f colour( const ray &r, hittable *world) {
 
 	hitRecord hr;
-	if (world->hit(r, 0.0, FLT_MAX, hr)) {
-		return 0.5*Vector3f(hr.normal[0] + 1, hr.normal[1] + 1, hr.normal[2] + 1);
+	if (world->hit(r, 0.001, FLT_MAX, hr)) {
+
+		Vector3f target = hr.p + hr.normal + randInSphere();
+		return 0.5*colour(ray(hr.p, target - hr.p), world);
 	}
 	else {
 		Vector3f unitVec = r.direction().normalized();
@@ -127,11 +146,6 @@ Vector3f colour( const ray &r, hittable *world) {
 		return (1.0 - t)*Vector3f(1.0, 1.0, 1.0) + t * Vector3f(0.5, 0.7, 1.0);
 	}
 	
-}
-
-//rand double generator for antialiasing 
-double randomDouble() {
-	return rand() / (RAND_MAX + 1.0);
 }
 
 //abstraction of the camera class 
@@ -149,6 +163,7 @@ public:
 
 	Vector3f lowerLeft, horizontal, vertical, origin;
 };
+
 
 
 int main() {
@@ -189,6 +204,8 @@ int main() {
 			}
 			//take the average of the pixel color
 			col /= ns;
+			//gamma correct the image
+			col = Vector3f(sqrt(col[0]), sqrt(col[1]), sqrt(col[2]));
 			//set the color 
 			int ir = int(255.99*col[0]);
 			int ig = int(255.99*col[1]);
