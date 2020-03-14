@@ -14,6 +14,8 @@ this raytracer doesn't leverage the gpu at all its purely cpu based.
 #include <cstdlib>
 #include <cmath>
 
+#define PI 3.14159265358979323846
+
 //using namespace Eigen;
 
 class material;
@@ -279,11 +281,20 @@ vec3 colour( const ray &r, hittable *world, int depth) {
 //abstraction of the camera class 
 class camera {
 public:
-	camera() { 
-		lowerLeft = vec3(-2.0, -1.0, -1.0);
-		horizontal = vec3(4.0, 0.0, 0.0);
-		vertical = vec3(0.0, 2.0, 0.0);
-		origin = vec3(0.0, 0.0, 0.0);
+	camera(vec3 lookFrom, vec3 lookAt, vec3 vup, float fov, float aspect) {
+		vec3 u, v, w;
+		float theta = fov * PI / 180;
+		float halfHeight = tan(theta / 2);
+		float halfWidth = aspect * halfHeight;
+		origin = lookFrom;
+		w = unit_vector(lookFrom - lookAt);
+		u = unit_vector(cross(vup, w));
+		v = cross(w, u);
+
+		lowerLeft = origin - halfWidth * u - halfHeight * v - w;
+		horizontal = 2 * halfWidth*u;
+		vertical = 2 * halfHeight*v;
+
 	}
 	ray getRay(float u, float v) {
 		return ray(origin, lowerLeft + u * horizontal + v * vertical - origin);
@@ -317,7 +328,7 @@ int main() {
 
 	//create the new hit list 
 	hittable *world = new hitList(list, 5);
-	camera cam;
+	camera cam(vec3(-2, 2, 1), vec3(0, 0, -1), vec3(0, 1, 0), 45, float(nx) / float(ny));
 	//draw the ppm image 
 	for (int j = ny - 1; j >= 0; j--) {
 		for (int i = 0; i < nx; i++) {
