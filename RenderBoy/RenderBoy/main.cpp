@@ -155,15 +155,18 @@ vec3 reflect(const vec3 &v, const vec3 &n) {
 
 class metal : public material {
 public:
-	metal(const vec3& a) : albedo(a) {}
+	metal(const vec3& a, float f) : albedo(a) {
+		f < 1 ? fuzz = f : fuzz = 1;
+	}
 	virtual bool scatter(const ray& r_in, const hitRecord& rec,
 		vec3& attenuation, ray& scattered) const {
 		vec3 reflected = reflect(unit_vector(r_in.direction()), rec.normal);
-		scattered = ray(rec.p, reflected);
+		scattered = ray(rec.p, reflected + fuzz*randInSphere());
 		attenuation = albedo;
 		return (dot(scattered.direction(), rec.normal) > 0);
 	}
 	vec3 albedo;
+	float fuzz;
 };
 //hit function for the whole list
 bool hitList::hit(const ray& r, float t_min, float t_max,hitRecord& rec) const {
@@ -241,8 +244,8 @@ int main() {
 	//populate that list 
 	list[0] = new sphere(vec3(0, 0, -1), 0.5, new lambertian(vec3(0.0, 0.5, 0.7)));
 	list[1] = new sphere(vec3(0, -100.5, -1), 100, new lambertian(vec3(0.5, 0.5, 0.0)));
-	list[2] = new sphere(vec3(1, 0, -1), 0.5, new metal(vec3(0.8, 0.6, 0.2)));
-	list[3] = new sphere(vec3(-1, 0, -1), 0.5, new metal(vec3(0.8, 0.8, 0.8)));
+	list[2] = new sphere(vec3(1, 0, -1), 0.5, new metal(vec3(0.8, 0.6, 0.2), 0.7));
+	list[3] = new sphere(vec3(-1, 0, -1), 0.5, new metal(vec3(0.8, 0.8, 0.8), 0.3));
 
 	//create the new hit list 
 	hittable *world = new hitList(list, 4);
