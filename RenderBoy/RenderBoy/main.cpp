@@ -51,7 +51,6 @@ public:
 	virtual bool hit(const ray &r, float tMin, float tMax, hitRecord &rec) const = 0;
 };
 
-
 //base class for all materials
 class material {
 public:
@@ -68,6 +67,7 @@ public:
 	float radius;
 	material *matPtr;
 };
+
 //hit function for the sphere
 bool sphere::hit(const ray &r, float tMin, float tMax, hitRecord &rec) const{
 	//get the vector from the ray to the center of the sphere 
@@ -131,7 +131,6 @@ vec3 randInSphere() {
 	return p;
 }
 
-
 //this class handles lambertian (diffuse) material
 class lambertian : public material {
 public:
@@ -153,7 +152,7 @@ vec3 reflect(const vec3 &v, const vec3 &n) {
 	return v-2*dot(v,n)*n;
 }
 
-
+//this class handles metal material
 class metal : public material {
 public:
 	metal(const vec3& a, float f) : albedo(a) {
@@ -169,6 +168,7 @@ public:
 	vec3 albedo;
 	float fuzz;
 };
+
 //hit function for the whole list
 bool hitList::hit(const ray& r, float t_min, float t_max,hitRecord& rec) const {
 
@@ -278,11 +278,21 @@ vec3 colour( const ray &r, hittable *world, int depth) {
 	
 }
 
+//gets a random point in a disk (our camera lens)
+vec3 randUnitInDisk() {
+	vec3 p;
+	do {
+		p = 2.0*vec3(randomDouble(), randomDouble(), 0) - vec3(1, 1, 0);
+	} while (dot(p, p) >= 1);
+
+	return p;
+}
+
 //abstraction of the camera class 
 class camera {
 public:
-	camera(vec3 lookFrom, vec3 lookAt, vec3 vup, float fov, float aspect) {
-		vec3 u, v, w;
+	camera(vec3 lookFrom, vec3 lookAt, vec3 vup, float fov, float aspect, float apeture, float focusDist) {
+		lensRadius = apeture / 2;
 		float theta = fov * PI / 180;
 		float halfHeight = tan(theta / 2);
 		float halfWidth = aspect * halfHeight;
@@ -291,26 +301,71 @@ public:
 		u = unit_vector(cross(vup, w));
 		v = cross(w, u);
 
-		lowerLeft = origin - halfWidth * u - halfHeight * v - w;
-		horizontal = 2 * halfWidth*u;
-		vertical = 2 * halfHeight*v;
+		lowerLeft = origin - halfWidth * focusDist * u - halfHeight * focusDist * v - focusDist * w;
+		horizontal = 2 * halfWidth*focusDist*u;
+		vertical = 2 * halfHeight*focusDist*v;
 
 	}
-	ray getRay(float u, float v) {
-		return ray(origin, lowerLeft + u * horizontal + v * vertical - origin);
+	ray getRay(float s, float t) {
+		vec3 r = lensRadius * randUnitInDisk();
+		vec3 offset = u * r.x() + v * r.y();
+		return ray(origin + offset, lowerLeft + s * horizontal + t * vertical - origin - offset);
 	}
 
 	vec3 lowerLeft, horizontal, vertical, origin;
+	float lensRadius;
+	vec3 u, v, w;
+
 };
 
+//generate a scene of random spheres
+hittable *randScene() {
+	int n = 500;
+	hittable **list = new hittable*[n + 1];
+	list[0] = new sphere(vec3(0, -1000, 0), 1000, new lambertian(vec3(0.5, 0.5, 0.5)));
+	int i = 1;
+	//this loop generates a bunch of random spheres 
+	for (int a = -11; a < 11; a++) {
+		for (int b = -11; b < 11; b++) {
+			float chooseMat = randomDouble();
+			vec3 center(a + 0.9*randomDouble(), 0.2, b + 0.9*randomDouble());
+			if ((center - vec3(4, 0.2, 0)).length() > 0.9) {
+				if (chooseMat < 0.8) {
+					//diffuse case
+					list[i++] = new sphere(center, 0.2, new lambertian(
+						vec3(randomDouble()*randomDouble(), 
+							randomDouble()*randomDouble(), 
+							randomDouble()*randomDouble())));
+				}
+				else if(chooseMat < 0.95){
+					//metal case
+					list[i++] = new sphere(center, 0.2, new metal(vec3(0.5*(1 + randomDouble()),
+						0.5*(1 + randomDouble()),
+						0.5*(1 + randomDouble())),
+						0.5*randomDouble()));
+				}
+				else {
+					//glass case
+					list[i++] = new sphere(center, 0.2, new dielectric(1.5));
+				}
+			}
+		}
+	}
 
+	//three large spehere one of each type
+	list[i++] = new sphere(vec3(0, 1, 0), 1.0, new dielectric(1.5));
+	list[i++] = new sphere(vec3(-4, 1, 0), 1.0, new lambertian(vec3(0.4, 0.2, 0.1)));
+	list[i++] = new sphere(vec3(4, 1, 0), 1.0, new metal(vec3(0.7, 0.6, 0.5), 0.0));
+
+	return new hitList(list, i);
+}
 
 int main() {
 	//screen x,y and sample sizes in terms of pixels
-	int nx = 200;
-	int ny = 100;
+	int nx = 1200;
+	int ny = 800;
 	//the higher the ns value the better the antialiasing but slows down the program 
-	int ns = 50;
+	int ns = 100;
 
 	//open the file 
 	std::ofstream image;
@@ -318,17 +373,24 @@ int main() {
 	image << "P3\n" << nx << " " << ny << "\n255\n";
 
 	//create a list of hittable objects 
-	hittable *list[5];
+/*	hittable *list[5];
 	//populate that list 
 	list[0] = new sphere(vec3(0, 0, -1), 0.5, new lambertian(vec3(0.0, 0.5, 0.7)));
 	list[1] = new sphere(vec3(0, -100.5, -1), 100, new lambertian(vec3(0.5, 0.5, 0.0)));
 	list[2] = new sphere(vec3(1, 0, -1), 0.5, new metal(vec3(0.8, 0.6, 0.2), 0.7));
 	list[3] = new sphere(vec3(-1, 0, -1), 0.5, new dielectric(1.5));
-	list[4] = new sphere(vec3(-1, 0, -1), -0.45, new dielectric(1.5));
+	list[4] = new sphere(vec3(-1, 0, -1), -0.45, new dielectric(1.5));*/
+
+
+	//camera info
+	vec3 lookFrom(13, 2, 3);
+	vec3 lookAt(0, 0, 0);
+	float distToFocus = (lookFrom - lookAt).length();
+	float appeture = 0.1;
+	camera cam(lookFrom, lookAt, vec3(0, 1, 0), 45, float(nx) / float(ny),appeture,distToFocus);
 
 	//create the new hit list 
-	hittable *world = new hitList(list, 5);
-	camera cam(vec3(-2, 2, 1), vec3(0, 0, -1), vec3(0, 1, 0), 45, float(nx) / float(ny));
+	hittable *world = randScene();
 	//draw the ppm image 
 	for (int j = ny - 1; j >= 0; j--) {
 		for (int i = 0; i < nx; i++) {
