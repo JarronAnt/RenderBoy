@@ -3,30 +3,34 @@ READ:
 This is my first serious attempt at a raytracer so bare with the code.
 Terrible coding practices are in place cause im lazy
 using the eigen3 library for all linear algebra operations cause I cant 
-be botherd to create my own vector class 
+be botherd to create my own vector class (NOTE: I added my own vector class anyways)
 preformance isnt an object of concern in this raytracer so if it compiles slow....that's unfortuante  
 this raytracer doesn't leverage the gpu at all its purely cpu based.
 */
 
-#include <Eigen/Dense>
+//#include <Eigen/Dense>
+#include "vec3.h"
 #include <iostream>
 #include <fstream>
 #include <cstdlib>
 #include <cmath>
 
-using namespace Eigen;
+//using namespace Eigen;
+
+class material;
 
 //this class hold all the ray info 
 class ray {
 public:
-	ray(const Vector3f &a, const Vector3f &b) { A = a; B = b; }
+	ray() {}
+	ray(const vec3 &a, const vec3 &b) { A = a; B = b; }
 
-	Vector3f A;
-	Vector3f B;
+	vec3 A;
+	vec3 B;
 
-	Vector3f origin() const { return A; }
-	Vector3f direction() const { return B; }
-	Vector3f point_at_T(float t) const { return (A + t * B); }
+	vec3 origin() const { return A; }
+	vec3 direction() const { return B; }
+	vec3 point_at_T(float t) const { return (A + t * B); }
 
 	
 
@@ -35,32 +39,42 @@ public:
 //hittable object info
 struct hitRecord {
 	float t;
-	Vector3f p;
-	Vector3f normal;
+	vec3 p;
+	vec3 normal;
+	material *matPtr;
 };
+
 //base class for all hittable object
 class hittable {
 public:
 	virtual bool hit(const ray &r, float tMin, float tMax, hitRecord &rec) const = 0;
 };
 
+
+//base class for all materials
+class material {
+public:
+	virtual bool scatter(const ray &r, const hitRecord &hr, vec3 &attenuation, ray &scattered) const = 0;
+};
+
 //sphere class 
 class sphere : public hittable {
 public:
 	sphere() {}
-	sphere(Vector3f cen, float r) :center(cen), radius(r) {};
+	sphere(vec3 cen, float r, material *m) :center(cen), radius(r), matPtr(m) {};
 	virtual bool hit(const ray &r, float tMin, float tMax, hitRecord &rec) const;
-	Vector3f center;
+	vec3 center;
 	float radius;
+	material *matPtr;
 };
 //hit function for the sphere
 bool sphere::hit(const ray &r, float tMin, float tMax, hitRecord &rec) const{
 	//get the vector from the ray to the center of the sphere 
-	Vector3f OC = r.origin() - center;
+	vec3 OC = r.origin() - center;
 	//get the abc components of the qudratic equation 
-	float a = r.direction().dot(r.direction());
-	float b = OC.dot(r.direction());
-	float c = OC.dot(OC) - radius * radius;
+	float a = dot(r.direction(), r.direction());
+	float b = dot(OC, r.direction());
+	float c = dot(OC,OC) - radius * radius;
 	//calculate the discriminate if discrim > 0 we have a real soloution 
 	// to the equation of the line hitting the sphere 
 	float discrim = b * b -  a*c;
@@ -71,6 +85,7 @@ bool sphere::hit(const ray &r, float tMin, float tMax, hitRecord &rec) const{
 			rec.t = temp;
 			rec.p = r.point_at_T(rec.t);
 			rec.normal = (rec.p - center) / radius;
+			rec.matPtr = matPtr;
 			return true;
 		}
 		temp = (-b + sqrt(discrim)) / a;
@@ -78,6 +93,7 @@ bool sphere::hit(const ray &r, float tMin, float tMax, hitRecord &rec) const{
 			rec.t = temp;
 			rec.p = r.point_at_T(rec.t);
 			rec.normal = (rec.p - center) / radius;
+			rec.matPtr = matPtr;
 			return true;
 		}
 	}
@@ -98,6 +114,57 @@ public:
 	int listSize;
 };
 
+//rand double generator for antialiasing 
+double randomDouble() {
+	return rand() / (RAND_MAX + 1.0);
+}
+
+//this function gives us a random point in the sphere for diffuse lighting
+vec3 randInSphere() {
+	vec3 p;
+	do {
+
+		p = 2.0*vec3(randomDouble(), randomDouble(), randomDouble()) - vec3(1, 1, 1);
+
+	} while ((p[0] * p[0] + p[1] * p[1] + p[2] * p[2]) >= 1.0);
+	return p;
+}
+
+
+//this class handles lambertian (diffuse) material
+class lambertian : public material {
+public:
+	lambertian(const vec3 &a) : albedo(a) {}
+	virtual bool scatter(const ray &r, const hitRecord &hr, vec3 &attenuation, ray &scattered) const {
+		vec3 target = hr.p + hr.normal + randInSphere();
+		scattered = ray(hr.p, target - hr.p);
+		attenuation = albedo;
+		return true;
+	}
+
+
+	vec3 albedo;
+};
+
+//this is the function that handles reflections
+vec3 reflect(const vec3 &v, const vec3 &n) {
+	
+	return v-2*dot(v,n)*n;
+}
+
+
+class metal : public material {
+public:
+	metal(const vec3& a) : albedo(a) {}
+	virtual bool scatter(const ray& r_in, const hitRecord& rec,
+		vec3& attenuation, ray& scattered) const {
+		vec3 reflected = reflect(unit_vector(r_in.direction()), rec.normal);
+		scattered = ray(rec.p, reflected);
+		attenuation = albedo;
+		return (dot(scattered.direction(), rec.normal) > 0);
+	}
+	vec3 albedo;
+};
 //hit function for the whole list
 bool hitList::hit(const ray& r, float t_min, float t_max,hitRecord& rec) const {
 
@@ -115,35 +182,26 @@ bool hitList::hit(const ray& r, float t_min, float t_max,hitRecord& rec) const {
 	return hitAnything;
 }
 
-//rand double generator for antialiasing 
-double randomDouble() {
-	return rand() / (RAND_MAX + 1.0);
-}
-
-//this function gives us a random point in the sphere for diffuse lighting
-Vector3f randInSphere() {
-	Vector3f p;
-	do {
-
-		p = 2.0*Vector3f(randomDouble(), randomDouble(), randomDouble()) - Vector3f(1, 1, 1);
-
-	} while ((p[0] * p[0] + p[1] * p[1] + p[2] * p[2]) >= 1.0);
-	return p;
-}
 
 //color in our scene 
-Vector3f colour( const ray &r, hittable *world) {
+vec3 colour( const ray &r, hittable *world, int depth) {
 
 	hitRecord hr;
 	if (world->hit(r, 0.001, FLT_MAX, hr)) {
-
-		Vector3f target = hr.p + hr.normal + randInSphere();
-		return 0.5*colour(ray(hr.p, target - hr.p), world);
+		ray scattered;		
+		vec3 attenuation;
+		if (depth < 50 && hr.matPtr->scatter(r, hr, attenuation, scattered)) {
+			return attenuation * colour(scattered, world, depth + 1);
+		}
+		else {
+			return vec3(0, 0, 0);
+		}
+		
 	}
 	else {
-		Vector3f unitVec = r.direction().normalized();
+		vec3 unitVec = unit_vector(r.direction());
 		float t = 0.5*(unitVec[1] + 1.0);
-		return (1.0 - t)*Vector3f(1.0, 1.0, 1.0) + t * Vector3f(0.5, 0.7, 1.0);
+		return (1.0 - t)*vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
 	}
 	
 }
@@ -152,16 +210,16 @@ Vector3f colour( const ray &r, hittable *world) {
 class camera {
 public:
 	camera() { 
-		lowerLeft = Vector3f(-2.0, -1.0, -1.0);
-		horizontal = Vector3f(4.0, 0.0, 0.0);
-		vertical = Vector3f(0.0, 2.0, 0.0);
-		origin = Vector3f(0.0, 0.0, 0.0);
+		lowerLeft = vec3(-2.0, -1.0, -1.0);
+		horizontal = vec3(4.0, 0.0, 0.0);
+		vertical = vec3(0.0, 2.0, 0.0);
+		origin = vec3(0.0, 0.0, 0.0);
 	}
 	ray getRay(float u, float v) {
 		return ray(origin, lowerLeft + u * horizontal + v * vertical - origin);
 	}
 
-	Vector3f lowerLeft, horizontal, vertical, origin;
+	vec3 lowerLeft, horizontal, vertical, origin;
 };
 
 
@@ -179,18 +237,21 @@ int main() {
 	image << "P3\n" << nx << " " << ny << "\n255\n";
 
 	//create a list of hittable objects 
-	hittable *list[2];
+	hittable *list[4];
 	//populate that list 
-	list[0] = new sphere(Vector3f(0, 0, -1), 0.5);
-	list[1] = new sphere(Vector3f(0, -100.5, -1), 100);
+	list[0] = new sphere(vec3(0, 0, -1), 0.5, new lambertian(vec3(0.0, 0.5, 0.7)));
+	list[1] = new sphere(vec3(0, -100.5, -1), 100, new lambertian(vec3(0.5, 0.5, 0.0)));
+	list[2] = new sphere(vec3(1, 0, -1), 0.5, new metal(vec3(0.8, 0.6, 0.2)));
+	list[3] = new sphere(vec3(-1, 0, -1), 0.5, new metal(vec3(0.8, 0.8, 0.8)));
+
 	//create the new hit list 
-	hittable *world = new hitList(list, 2);
+	hittable *world = new hitList(list, 4);
 	camera cam;
 	//draw the ppm image 
 	for (int j = ny - 1; j >= 0; j--) {
 		for (int i = 0; i < nx; i++) {
 			//set color to black  for each pixel initally 
-			Vector3f col(0, 0, 0);
+			vec3 col(0, 0, 0);
 			//this loop samples the colour in the pixel
 			for (int  s = 0; s < ns; s++)
 			{
@@ -200,12 +261,12 @@ int main() {
 				//get the ray based on above coords
 				ray r = cam.getRay(u, v);
 				//add all the colors in the pixel 
-				col += colour(r, world);
+				col += colour(r, world,0);
 			}
 			//take the average of the pixel color
 			col /= ns;
 			//gamma correct the image
-			col = Vector3f(sqrt(col[0]), sqrt(col[1]), sqrt(col[2]));
+			col = vec3(sqrt(col[0]), sqrt(col[1]), sqrt(col[2]));
 			//set the color 
 			int ir = int(255.99*col[0]);
 			int ig = int(255.99*col[1]);
