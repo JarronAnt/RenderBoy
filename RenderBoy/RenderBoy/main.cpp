@@ -8,7 +8,6 @@ preformance isnt an object of concern in this raytracer so if it compiles slow..
 this raytracer doesn't leverage the gpu at all its purely cpu based.
 */
 
-//#include <Eigen/Dense>
 #include "vec3.h"
 #include <iostream>
 #include <fstream>
@@ -185,6 +184,74 @@ bool hitList::hit(const ray& r, float t_min, float t_max,hitRecord& rec) const {
 	return hitAnything;
 }
 
+//this function handles refraction of a ray based on snells law
+bool refract(const vec3 &v, const vec3 &n, float niOverNt, vec3 &refracted) {
+	vec3 uv = unit_vector(v);
+	float dt = dot(uv, n);
+	float discrim = 1.0 - niOverNt * niOverNt*(1 - dt * dt);
+	if (discrim > 0) {
+		refracted = niOverNt * (uv - n * dt) - n * sqrt(discrim);
+		return true;
+	}
+	else {
+		return false;
+	}
+}
+
+//this function approximates reflectivity based on angle 
+float schlick(float cos, float rfxIdx) {
+	float r0 = (1 - rfxIdx) / (1 + rfxIdx);
+	r0 = r0 * r0;
+	return r0 + (1 - r0)*pow((1 - cos), 5);
+}
+
+//this function hold the code for dielectric material
+class dielectric : public material {
+public:
+	dielectric(float ri) :rfxIdx(ri){}
+	virtual bool scatter(const ray &r, const hitRecord &hr, vec3 &attenuation, ray &scattered) const {
+
+		vec3 outNormal;
+		vec3 reflected = reflect(r.direction(), hr.normal);
+		float niOverNt;
+		attenuation = vec3(1.0, 1.0 ,1.0);
+		vec3 refracted;
+
+		float reflectProb;
+		float cos;
+
+		if (dot(r.direction(), hr.normal) > 0) {
+			outNormal = -hr.normal;
+			niOverNt = rfxIdx;
+			cos = rfxIdx * dot(r.direction(), hr.normal) / r.direction().length();
+		}
+		else {
+			outNormal = hr.normal;
+			niOverNt = 1.0 / rfxIdx;
+			cos =  -dot(r.direction(), hr.normal) / r.direction().length();
+
+		}
+
+		if (refract(r.direction(), outNormal, niOverNt, refracted)) {
+			reflectProb = schlick(cos, rfxIdx);
+		}
+		else {
+			reflectProb = 1.0;
+		}
+
+		if (randomDouble() < reflectProb) {
+			scattered = ray(hr.p, reflected);
+		}
+		else {
+			scattered = ray(hr.p, refracted);
+		}
+
+		return true;
+	}
+
+
+	float rfxIdx;
+};
 
 //color in our scene 
 vec3 colour( const ray &r, hittable *world, int depth) {
@@ -240,15 +307,16 @@ int main() {
 	image << "P3\n" << nx << " " << ny << "\n255\n";
 
 	//create a list of hittable objects 
-	hittable *list[4];
+	hittable *list[5];
 	//populate that list 
 	list[0] = new sphere(vec3(0, 0, -1), 0.5, new lambertian(vec3(0.0, 0.5, 0.7)));
 	list[1] = new sphere(vec3(0, -100.5, -1), 100, new lambertian(vec3(0.5, 0.5, 0.0)));
 	list[2] = new sphere(vec3(1, 0, -1), 0.5, new metal(vec3(0.8, 0.6, 0.2), 0.7));
-	list[3] = new sphere(vec3(-1, 0, -1), 0.5, new metal(vec3(0.8, 0.8, 0.8), 0.3));
+	list[3] = new sphere(vec3(-1, 0, -1), 0.5, new dielectric(1.5));
+	list[4] = new sphere(vec3(-1, 0, -1), -0.45, new dielectric(1.5));
 
 	//create the new hit list 
-	hittable *world = new hitList(list, 4);
+	hittable *world = new hitList(list, 5);
 	camera cam;
 	//draw the ppm image 
 	for (int j = ny - 1; j >= 0; j--) {
