@@ -137,3 +137,8 @@ inline vec3& vec3::operator/=(const float t) {
 inline vec3 unit_vector(vec3 v) {
 	return v / v.length();
 }
+
+//rand double generator for antialiasing 
+double randomDouble() {
+	return rand() / (RAND_MAX + 1.0);
+}

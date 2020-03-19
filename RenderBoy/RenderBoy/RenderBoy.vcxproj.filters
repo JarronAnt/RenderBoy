@@ -23,5 +23,8 @@
     <ClInclude Include="vec3.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="perlin.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

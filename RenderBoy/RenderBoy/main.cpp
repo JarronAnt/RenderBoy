@@ -13,6 +13,7 @@ this raytracer doesn't leverage the gpu at all its purely cpu based.
 #include <fstream>
 #include <cstdlib>
 #include <cmath>
+#include "perlin.h"
 
 #define PI 3.14159265358979323846
 
@@ -222,10 +223,6 @@ public:
 	int listSize;
 };
 
-//rand double generator for antialiasing 
-double randomDouble() {
-	return rand() / (RAND_MAX + 1.0);
-}
 
 //this function gives us a random point in the sphere for diffuse lighting
 vec3 randInSphere() {
@@ -593,6 +590,17 @@ bvh_node::bvh_node(hittable **l, int n, float time0, float time1) {
 
 	box = surrounding_box(box_left, box_right);
 }
+
+
+class noiseTex : public texture {
+public:
+	noiseTex(){}
+	virtual vec3 value(float u, float v, const vec3 &p) const {
+		return vec3(1, 1, 1) * noise.noise(p);
+	}
+	perlin noise;
+};
+
 //----------------------------------------------Scenes-------------------------------------------------------//
 
 hittable *randScene() {
@@ -657,6 +665,13 @@ hittable *twoSpheres() {
 	list[1] = new sphere(vec3(0, 10, 0), 10, new lambertian(checker));
 	return new hitList(list, 2);
 }
+hittable *twoPerlin() {
+	texture *pertext = new noiseTex();
+	hittable **list = new hittable*[2];
+	list[0] = new sphere(vec3(0, -1000, 0), 1000, new lambertian(pertext));
+	list[1] = new sphere(vec3(0, 2, 0), 2, new lambertian(pertext));
+	return new hitList(list, 2);
+}
 
 //------------------------------------------------------------------------------------------------------------//
 int main() {
@@ -689,7 +704,7 @@ int main() {
 	camera cam(lookFrom, lookAt, vec3(0, 1, 0), 20, float(nx) / float(ny),appeture,distToFocus,0.0,1.0);
 
 	//create the new hit list 
-	hittable *world = randScene();
+	hittable *world = twoPerlin();
 	//draw the ppm image 
 	for (int j = ny - 1; j >= 0; j--) {
 		for (int i = 0; i < nx; i++) {
