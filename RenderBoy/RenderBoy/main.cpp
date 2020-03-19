@@ -24,14 +24,16 @@ class material;
 class ray {
 public:
 	ray() {}
-	ray(const vec3 &a, const vec3 &b) { A = a; B = b; }
+	ray(const vec3 &a, const vec3 &b, float ti = 0.0) { A = a; B = b; _time = ti; }
 
 	vec3 A;
 	vec3 B;
+	float _time;
 
 	vec3 origin() const { return A; }
 	vec3 direction() const { return B; }
 	vec3 point_at_T(float t) const { return (A + t * B); }
+	float time() const { return _time; }
 
 	
 
@@ -45,11 +47,53 @@ struct hitRecord {
 	material *matPtr;
 };
 
+//some faster comparison functions
+float ffmin(float a, float b) { return a < b ? a : b; }
+float ffmax(float a, float b) { return a > b ? a : b; }
+
+//axis aligned bounded box 
+class aabb {
+public:
+	aabb() {}
+	aabb(const vec3& a, const vec3& b) { _min = a; _max = b; }
+
+	vec3 min() const { return _min; }
+	vec3 max() const { return _max; }
+
+	bool hit(const ray& r, float tmin, float tmax) const {
+		for (int a = 0; a < 3; a++) {
+			float t0 = ffmin((_min[a] - r.origin()[a]) / r.direction()[a],
+				(_max[a] - r.origin()[a]) / r.direction()[a]);
+			float t1 = ffmax((_min[a] - r.origin()[a]) / r.direction()[a],
+				(_max[a] - r.origin()[a]) / r.direction()[a]);
+			tmin = ffmax(t0, tmin);
+			tmax = ffmin(t1, tmax);
+			if (tmax <= tmin)
+				return false;
+		}
+		return true;
+	}
+
+	vec3 _min;
+	vec3 _max;
+};
+
 //base class for all hittable object
 class hittable {
 public:
 	virtual bool hit(const ray &r, float tMin, float tMax, hitRecord &rec) const = 0;
+	virtual bool bounding_box(float t0, float t1, aabb& box) const = 0;
 };
+
+ aabb surrounding_box(aabb box0, aabb box1) {
+	 vec3 small(ffmin(box0.min().x(), box1.min().x()),
+		 ffmin(box0.min().y(), box1.min().y()),
+		 ffmin(box0.min().z(), box1.min().z()));
+	 vec3 big(ffmax(box0.max().x(), box1.max().x()),
+		 ffmax(box0.max().y(), box1.max().y()),
+		 ffmax(box0.max().z(), box1.max().z()));
+	 return aabb(small, big);
+ }
 
 //base class for all materials
 class material {
@@ -63,10 +107,46 @@ public:
 	sphere() {}
 	sphere(vec3 cen, float r, material *m) :center(cen), radius(r), matPtr(m) {};
 	virtual bool hit(const ray &r, float tMin, float tMax, hitRecord &rec) const;
+	virtual bool bounding_box(float t0, float t1, aabb& box) const;
+
 	vec3 center;
 	float radius;
 	material *matPtr;
 };
+
+//build the bounding box for the sphere
+bool sphere::bounding_box(float t0, float t1, aabb& box) const {
+	box = aabb(center - vec3(radius, radius, radius),
+		center + vec3(radius, radius, radius));
+	return true;
+}
+
+//a moving sphere to test motion blur
+class movingSphere : public hittable {
+public:
+	movingSphere() {}
+	movingSphere(vec3 cen0, vec3 cen1, float t0, float t1, float r, material *m)
+		: center0(cen0), center1(cen1), time0(t0), time1(t1), radius(r), mat_ptr(m)
+	{};
+	virtual bool hit(const ray& r, float tmin, float tmax, hitRecord& rec) const;
+	virtual bool bounding_box(float t0, float t1, aabb& box) const;
+	vec3 center(float time) const;
+	vec3 center0, center1;
+	float time0, time1;
+	float radius;
+	material *mat_ptr;
+};
+vec3 movingSphere::center(float time) const {
+	return center0 + ((time - time0) / (time1 - time0))*(center1 - center0);
+}
+bool movingSphere::bounding_box(float t0, float t1, aabb& box) const {
+	aabb box0(center(t0) - vec3(radius, radius, radius),
+		center(t0) + vec3(radius, radius, radius));
+	aabb box1(center(t1) - vec3(radius, radius, radius),
+		center(t1) + vec3(radius, radius, radius));
+	box = surrounding_box(box0, box1);
+	return true;
+}
 
 //hit function for the sphere
 bool sphere::hit(const ray &r, float tMin, float tMax, hitRecord &rec) const{
@@ -100,6 +180,32 @@ bool sphere::hit(const ray &r, float tMin, float tMax, hitRecord &rec) const{
 	}
 	return false;
 }
+bool movingSphere::hit(const ray& r, float t_min, float t_max, hitRecord& rec) const {
+	vec3 oc = r.origin() - center(r.time());
+	float a = dot(r.direction(), r.direction());
+	float b = dot(oc, r.direction());
+	float c = dot(oc, oc) - radius * radius;
+	float discriminant = b * b - a * c;
+	if (discriminant > 0) {
+		float temp = (-b - sqrt(discriminant)) / a;
+		if (temp < t_max && temp > t_min) {
+			rec.t = temp;
+			rec.p = r.point_at_T(rec.t);
+			rec.normal = (rec.p - center(r.time())) / radius;
+			rec.matPtr = mat_ptr;
+			return true;
+		}
+		temp = (-b + sqrt(discriminant)) / a;
+		if (temp < t_max && temp > t_min) {
+			rec.t = temp;
+			rec.p = r.point_at_T(rec.t);
+			rec.normal = (rec.p - center(r.time())) / radius;
+			rec.matPtr = mat_ptr;
+			return true;
+		}
+	}
+	return false;
+}
 
 //a list of all hittable objects
 class hitList : public hittable {
@@ -110,6 +216,7 @@ public:
 	//hit function for objects in the list
 	virtual bool hit(
 		const ray& r, float tmin, float tmax, hitRecord& rec) const;
+	virtual bool bounding_box(float t0, float t1, aabb& box) const;
 	//double pointer = list 
 	hittable **list;
 	int listSize;
@@ -131,19 +238,49 @@ vec3 randInSphere() {
 	return p;
 }
 
+class texture {
+public:
+	virtual vec3 value(float u, float v, const vec3& p) const = 0;
+};
+
+class constant_texture : public texture {
+public:
+	constant_texture() {}
+	constant_texture(vec3 c) : color(c) {}
+	virtual vec3 value(float u, float v, const vec3& p) const {
+		return color;
+	}
+	vec3 color;
+};
+
+class checker_texture : public texture {
+public:
+	checker_texture() {}
+	checker_texture(texture *t0, texture *t1) : even(t0), odd(t1) {}
+	virtual vec3 value(float u, float v, const vec3& p) const {
+		float sines = sin(10 * p.x())*sin(10 * p.y())*sin(10 * p.z());
+		if (sines < 0)
+			return odd->value(u, v, p);
+		else
+			return even->value(u, v, p);
+	}
+	texture *odd;
+	texture *even;
+};
+
 //this class handles lambertian (diffuse) material
 class lambertian : public material {
 public:
-	lambertian(const vec3 &a) : albedo(a) {}
+	lambertian(texture *a) : albedo(a) {}
 	virtual bool scatter(const ray &r, const hitRecord &hr, vec3 &attenuation, ray &scattered) const {
 		vec3 target = hr.p + hr.normal + randInSphere();
-		scattered = ray(hr.p, target - hr.p);
-		attenuation = albedo;
+		scattered = ray(hr.p, target - hr.p, r.time());
+		attenuation = albedo->value(0,0,hr.p);
 		return true;
 	}
 
 
-	vec3 albedo;
+	texture *albedo;
 };
 
 //this is the function that handles reflections
@@ -184,6 +321,24 @@ bool hitList::hit(const ray& r, float t_min, float t_max,hitRecord& rec) const {
 		}
 	}
 	return hitAnything;
+}
+
+bool hitList::bounding_box(float t0, float t1, aabb& box) const {
+	if (listSize < 1) return false;
+	aabb temp_box;
+	bool first_true = list[0]->bounding_box(t0, t1, temp_box);
+	if (!first_true)
+		return false;
+	else
+		box = temp_box;
+	for (int i = 1; i < listSize; i++) {
+		if (list[i]->bounding_box(t0, t1, temp_box)) {
+			box = surrounding_box(box, temp_box);
+		}
+		else
+			return false;
+	}
+	return true;
 }
 
 //this function handles refraction of a ray based on snells law
@@ -291,7 +446,10 @@ vec3 randUnitInDisk() {
 //abstraction of the camera class 
 class camera {
 public:
-	camera(vec3 lookFrom, vec3 lookAt, vec3 vup, float fov, float aspect, float apeture, float focusDist) {
+	camera(vec3 lookFrom, vec3 lookAt, vec3 vup, float fov, float aspect, float apeture, float focusDist,
+		float t0, float t1) {
+		time0 = t0;
+		time1 = t1;
 		lensRadius = apeture / 2;
 		float theta = fov * PI / 180;
 		float halfHeight = tan(theta / 2);
@@ -309,63 +467,204 @@ public:
 	ray getRay(float s, float t) {
 		vec3 r = lensRadius * randUnitInDisk();
 		vec3 offset = u * r.x() + v * r.y();
-		return ray(origin + offset, lowerLeft + s * horizontal + t * vertical - origin - offset);
+		float time = time0 + randomDouble()*(time1 - time0);
+		return ray(origin + offset, lowerLeft + s * horizontal + t * vertical - origin - offset,time);
 	}
 
 	vec3 lowerLeft, horizontal, vertical, origin;
 	float lensRadius;
 	vec3 u, v, w;
+	float time0, time1;
 
 };
 
-//generate a scene of random spheres
+//node of our bvh structure
+class bvh_node : public hittable {
+public:
+	bvh_node() {}
+	bvh_node(hittable **l, int n, float time0, float time1);
+
+	virtual bool hit(const ray& r, float tmin, float tmax, hitRecord& rec) const;
+	virtual bool bounding_box(float t0, float t1, aabb& box) const;
+
+	hittable *left;
+	hittable *right;
+	aabb box;
+};
+
+bool bvh_node::bounding_box(float t0, float t1, aabb& b) const {
+	b = box;
+	return true;
+}
+
+bool bvh_node::hit(const ray& r, float t_min, float t_max, hitRecord& rec) const {
+	if (box.hit(r, t_min, t_max)) {
+		hitRecord left_rec, right_rec;
+		bool hit_left = left->hit(r, t_min, t_max, left_rec);
+		bool hit_right = right->hit(r, t_min, t_max, right_rec);
+		if (hit_left && hit_right) {
+			if (left_rec.t < right_rec.t)
+				rec = left_rec;
+			else
+				rec = right_rec;
+			return true;
+		}
+		else if (hit_left) {
+			rec = left_rec;
+			return true;
+		}
+		else if (hit_right) {
+			rec = right_rec;
+			return true;
+		}
+		else
+			return false;
+	}
+	else return false;
+}
+
+//these are axis dependent comparioson 
+int box_x_compare(const void * a, const void * b) {
+	aabb box_left, box_right;
+	hittable *ah = *(hittable**)a;
+	hittable *bh = *(hittable**)b;
+	if (!ah->bounding_box(0, 0, box_left) || !bh->bounding_box(0, 0, box_right))
+		std::cerr << "no bounding box in bvh_node constructor\n";
+	if (box_left.min().x() - box_right.min().x() < 0.0)
+		return -1;
+	else
+		return 1;
+}
+int box_y_compare(const void * a, const void * b)
+{
+	aabb box_left, box_right;
+	hittable *ah = *(hittable**)a;
+	hittable *bh = *(hittable**)b;
+	if (!ah->bounding_box(0, 0, box_left) || !bh->bounding_box(0, 0, box_right))
+		std::cerr << "no bounding box in bvh_node constructor\n";
+	if (box_left.min().y() - box_right.min().y() < 0.0)
+		return -1;
+	else
+		return 1;
+}
+int box_z_compare(const void * a, const void * b)
+{
+	aabb box_left, box_right;
+	hittable *ah = *(hittable**)a;
+	hittable *bh = *(hittable**)b;
+	if (!ah->bounding_box(0, 0, box_left) || !bh->bounding_box(0, 0, box_right))
+		std::cerr << "no bounding box in bvh_node constructor\n";
+	if (box_left.min().z() - box_right.min().z() < 0.0)
+		return -1;
+	else
+		return 1;
+}
+
+//this class constructs our bvh structure
+bvh_node::bvh_node(hittable **l, int n, float time0, float time1) {
+	int axis = int(3 * randomDouble());
+
+	if (axis == 0)
+		qsort(l, n, sizeof(hittable *), box_x_compare);
+	else if (axis == 1)
+		qsort(l, n, sizeof(hittable *), box_y_compare);
+	else
+		qsort(l, n, sizeof(hittable *), box_z_compare);
+
+	if (n == 1) {
+		left = right = l[0];
+	}
+	else if (n == 2) {
+		left = l[0];
+		right = l[1];
+	}
+	else {
+		left = new bvh_node(l, n / 2, time0, time1);
+		right = new bvh_node(l + n / 2, n - n / 2, time0, time1);
+	}
+
+	aabb box_left, box_right;
+
+	if (!left->bounding_box(time0, time1, box_left) ||
+		!right->bounding_box(time0, time1, box_right)) {
+
+		std::cerr << "no bounding box in bvh_node constructor\n";
+	}
+
+	box = surrounding_box(box_left, box_right);
+}
+//----------------------------------------------Scenes-------------------------------------------------------//
+
 hittable *randScene() {
-	int n = 500;
+	int n = 50000;
 	hittable **list = new hittable*[n + 1];
-	list[0] = new sphere(vec3(0, -1000, 0), 1000, new lambertian(vec3(0.5, 0.5, 0.5)));
+
+	texture *checker = new checker_texture(
+		new constant_texture(vec3(0.2, 0.3, 0.1)),
+		new constant_texture(vec3(0.9, 0.9, 0.9))
+	);
+
+	list[0] = new sphere(vec3(0, -1000, 0), 1000, new lambertian(checker));
 	int i = 1;
-	//this loop generates a bunch of random spheres 
-	for (int a = -11; a < 11; a++) {
-		for (int b = -11; b < 11; b++) {
-			float chooseMat = randomDouble();
+	for (int a = -10; a < 10; a++) {
+		for (int b = -10; b < 10; b++) {
+			float choose_mat = randomDouble();
 			vec3 center(a + 0.9*randomDouble(), 0.2, b + 0.9*randomDouble());
 			if ((center - vec3(4, 0.2, 0)).length() > 0.9) {
-				if (chooseMat < 0.8) {
-					//diffuse case
-					list[i++] = new sphere(center, 0.2, new lambertian(
-						vec3(randomDouble()*randomDouble(), 
-							randomDouble()*randomDouble(), 
-							randomDouble()*randomDouble())));
+				if (choose_mat < 0.8) {  // diffuse
+					list[i++] = new movingSphere(
+						center,
+						center + vec3(0, 0.5*randomDouble(), 0),
+						0.0, 1.0, 0.2,
+						new lambertian(new constant_texture(
+							vec3(randomDouble()*randomDouble(),
+								randomDouble()*randomDouble(),
+								randomDouble()*randomDouble())
+						))
+					);
 				}
-				else if(chooseMat < 0.95){
-					//metal case
-					list[i++] = new sphere(center, 0.2, new metal(vec3(0.5*(1 + randomDouble()),
-						0.5*(1 + randomDouble()),
-						0.5*(1 + randomDouble())),
-						0.5*randomDouble()));
+				else if (choose_mat < 0.95) { // metal
+					list[i++] = new sphere(
+						center, 0.2,
+						new metal(
+							vec3(0.5*(1 + randomDouble()),
+								0.5*(1 + randomDouble()),
+								0.5*(1 + randomDouble())),
+							0.5*randomDouble()
+						)
+					);
 				}
-				else {
-					//glass case
+				else {  // glass
 					list[i++] = new sphere(center, 0.2, new dielectric(1.5));
 				}
 			}
 		}
 	}
 
-	//three large spehere one of each type
 	list[i++] = new sphere(vec3(0, 1, 0), 1.0, new dielectric(1.5));
-	list[i++] = new sphere(vec3(-4, 1, 0), 1.0, new lambertian(vec3(0.4, 0.2, 0.1)));
-	list[i++] = new sphere(vec3(4, 1, 0), 1.0, new metal(vec3(0.7, 0.6, 0.5), 0.0));
+	list[i++] = new sphere(vec3(-4, 1, 0), 1.0, new lambertian(new constant_texture(vec3(0.4, 0.2, 0.1))));
+	list[i++] = new sphere(vec3(-4, 1, 0), 1.0, new lambertian(new constant_texture(vec3(0.7, 0.6, 0.5))));
 
 	return new hitList(list, i);
 }
+hittable *twoSpheres() {
+	texture *checker = new checker_texture(
+		new constant_texture(vec3(0.2, 0.3, 0.1)),
+		new constant_texture(vec3(0.9, 0.9, 0.9)));
+	int n = 50;
+	hittable **list = new hittable*[n + 1];
+	list[0] = new sphere(vec3(0, -10, 0), 10, new lambertian(checker));
+	list[1] = new sphere(vec3(0, 10, 0), 10, new lambertian(checker));
+	return new hitList(list, 2);
+}
 
+//------------------------------------------------------------------------------------------------------------//
 int main() {
 	//screen x,y and sample sizes in terms of pixels
-	int nx = 1200;
-	int ny = 800;
+	int nx = 800;
+	int ny = 600;
 	//the higher the ns value the better the antialiasing but slows down the program 
-	int ns = 100;
+	int ns = 25;
 
 	//open the file 
 	std::ofstream image;
@@ -385,9 +684,9 @@ int main() {
 	//camera info
 	vec3 lookFrom(13, 2, 3);
 	vec3 lookAt(0, 0, 0);
-	float distToFocus = (lookFrom - lookAt).length();
-	float appeture = 0.1;
-	camera cam(lookFrom, lookAt, vec3(0, 1, 0), 45, float(nx) / float(ny),appeture,distToFocus);
+	float distToFocus = 10.0;
+	float appeture = 0.0;
+	camera cam(lookFrom, lookAt, vec3(0, 1, 0), 20, float(nx) / float(ny),appeture,distToFocus,0.0,1.0);
 
 	//create the new hit list 
 	hittable *world = randScene();
