@@ -595,10 +595,13 @@ bvh_node::bvh_node(hittable **l, int n, float time0, float time1) {
 class noiseTex : public texture {
 public:
 	noiseTex(){}
+	noiseTex(float sc) : scale(sc) {}
 	virtual vec3 value(float u, float v, const vec3 &p) const {
-		return vec3(1, 1, 1) * noise.noise(p);
+		//return vec3(1, 1, 1) * noise.noise(p * scale);
+		return vec3(1, 1, 1)*0.5*(1 + sin(scale*p.x() + 5 * noise.turb(scale*p)));
 	}
 	perlin noise;
+	float scale;
 };
 
 //----------------------------------------------Scenes-------------------------------------------------------//
@@ -666,7 +669,7 @@ hittable *twoSpheres() {
 	return new hitList(list, 2);
 }
 hittable *twoPerlin() {
-	texture *pertext = new noiseTex();
+	texture *pertext = new noiseTex(1);
 	hittable **list = new hittable*[2];
 	list[0] = new sphere(vec3(0, -1000, 0), 1000, new lambertian(pertext));
 	list[1] = new sphere(vec3(0, 2, 0), 2, new lambertian(pertext));
