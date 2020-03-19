@@ -643,7 +643,7 @@ hittable *randScene() {
 
 	list[i++] = new sphere(vec3(0, 1, 0), 1.0, new dielectric(1.5));
 	list[i++] = new sphere(vec3(-4, 1, 0), 1.0, new lambertian(new constant_texture(vec3(0.4, 0.2, 0.1))));
-	list[i++] = new sphere(vec3(-4, 1, 0), 1.0, new lambertian(new constant_texture(vec3(0.7, 0.6, 0.5))));
+	list[i++] = new sphere(vec3(4, 1, 0), 1.0, new lambertian(new constant_texture(vec3(0.7, 0.6, 0.5))));
 
 	return new hitList(list, i);
 }
