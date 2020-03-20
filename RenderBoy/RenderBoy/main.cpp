@@ -734,7 +734,40 @@ public:
 	hittable *ptr;
 };
 
+class box : public hittable {
+public:
+	box() {}
+	box(const vec3 &p0, const vec3 &p1, material *mat);
+	virtual bool hit(const ray &r, float t0, float t1, hitRecord &hr) const;
+	virtual bool bounding_box(float t0, float t1, aabb &box) const {
+		box = aabb(pmin, pmax);
+		return true;
+	}
+	vec3 pmin, pmax;
+	hittable *listPtr;
+};
 
+box::box(const vec3 &p0, const vec3 &p1, material *mat){
+	pmin = p0;
+	pmax = p1;
+	hittable **list = new hittable*[6];
+	list[0] = new xyRect(p0.x(), p1.x(), p0.y(), p1.y(), p1.z(), mat);
+	list[1] = new flipNorms(
+		new xyRect(p0.x(), p1.x(), p0.y(), p1.y(), p0.z(), mat));
+	list[2] = new xzRect(p0.x(), p1.x(), p0.z(), p1.z(), p1.y(), mat);
+	list[3] = new flipNorms(
+
+		new xzRect(p0.x(), p1.x(), p0.z(), p1.z(), p0.y(), mat));
+	list[4] = new yzRect(p0.y(), p1.y(), p0.z(), p1.z(), p1.x(), mat);
+	list[5] = new flipNorms(
+		new yzRect(p0.y(), p1.y(), p0.z(), p1.z(), p0.x(), mat));
+	listPtr = new hitList(list, 6);
+
+}
+
+bool box::hit(const ray &r, float t0, float t1, hitRecord &hr) const {
+	return listPtr->hit(r, t0, t1, hr);
+}
 //----------------------------------------------Scenes-------------------------------------------------------//
 
 hittable *randScene() {
@@ -832,7 +865,10 @@ hittable *cornellBox() {
 	list[i++] = new xzRect(213, 343, 227, 332, 554, light);
 	list[i++] = new flipNorms(new xzRect(0, 555, 0, 555, 555, white));
 	list[i++] = new xzRect(0, 555, 0, 555, 0, white);
-	list[i++] = new flipNorms(new xzRect(0, 555, 0, 555, 555, white));
+	list[i++] = new flipNorms(new xyRect(0, 555, 0, 555, 555, white));
+
+	list[i++] = new box(vec3(130, 0, 65), vec3(295, 165, 230), white);
+	list[i++] = new box(vec3(265, 0, 295), vec3(430, 330, 460), white);
 
 	return new hitList(list, i);
 }
