@@ -746,7 +746,6 @@ public:
 	vec3 pmin, pmax;
 	hittable *listPtr;
 };
-
 box::box(const vec3 &p0, const vec3 &p1, material *mat){
 	pmin = p0;
 	pmax = p1;
@@ -764,9 +763,100 @@ box::box(const vec3 &p0, const vec3 &p1, material *mat){
 	listPtr = new hitList(list, 6);
 
 }
-
 bool box::hit(const ray &r, float t0, float t1, hitRecord &hr) const {
 	return listPtr->hit(r, t0, t1, hr);
+}
+
+class translate : public hittable {
+public:
+	translate(hittable *p, const vec3 &displacement) :ptr(p), offset(displacement) {}
+	virtual bool hit(const ray &r, float tMin, float tMax, hitRecord &hr) const;
+	virtual bool bounding_box(float t0, float t1, aabb &box) const;
+	hittable *ptr;
+	vec3 offset;
+};
+bool translate::hit(const ray &r, float tMin, float tMax, hitRecord &hr) const {
+	ray movedR(r.origin() - offset, r.direction(), r.time());
+	if (ptr->hit(movedR, tMin, tMax, hr)) {
+		hr.p += offset;
+		return true;
+	}
+	else {
+		return false;
+	}
+}
+bool translate::bounding_box(float t0, float t1, aabb &box) const{
+	if (ptr->bounding_box(t0, t1, box)) {
+		box = aabb(box.min() + offset, box.max() + offset);
+		return true;
+	}
+	else {
+		return false;
+	}
+}
+
+class rotateY :public hittable {
+public:
+	rotateY(hittable *p, float angle);
+	virtual bool hit(const ray& r, float t_min, float t_max, hitRecord& rec) const;
+	virtual bool bounding_box(float t0, float t1, aabb& box) const {
+		box = bbox; return hasbox;
+	}
+	hittable *ptr;
+	float sin_theta;
+	float cos_theta;
+	bool hasbox;
+	aabb bbox;
+};
+rotateY::rotateY(hittable *p, float angle) :ptr(p) {
+	float radians = (PI / 180)*angle;
+	sin_theta = sin(radians);
+	cos_theta = cos(radians);
+	hasbox = ptr->bounding_box(0, 1, bbox);
+	vec3 min(FLT_MAX, FLT_MAX, FLT_MAX);
+	vec3 max(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+	for (int i = 0; i < 2; i++) {
+		for (int j = 0; j < 2; j++) {
+			for (int k = 0; k < 2; k++) {
+				float x = i * bbox.max().x() + (1 - i)*bbox.min().x();
+				float y = j * bbox.max().y() + (1 - j)*bbox.min().y();
+				float z = k * bbox.max().z() + (1 - k)*bbox.min().z();
+				float newx = cos_theta * x + sin_theta * z;
+				float newz = -sin_theta * x + cos_theta * z;
+				vec3 tester(newx, y, newz);
+				for (int c = 0; c < 3; c++)
+				{
+					if (tester[c] > max[c])
+						max[c] = tester[c];
+					if (tester[c] < min[c])
+						min[c] = tester[c];
+				}
+			}
+		}
+	}
+	bbox = aabb(min, max);
+}
+bool rotateY::hit(const ray &r, float tMin, float tMax, hitRecord &hr) const {
+	vec3 origin = r.origin();
+	vec3 direction = r.direction();
+	origin[0] = cos_theta * r.origin()[0] - sin_theta * r.origin()[2];
+	origin[2] = sin_theta * r.origin()[0] + cos_theta * r.origin()[2];
+	direction[0] = cos_theta * r.direction()[0] - sin_theta * r.direction()[2];
+	direction[2] = sin_theta * r.direction()[0] + cos_theta * r.direction()[2];
+	ray rotated_r(origin, direction, r.time());
+	if (ptr->hit(rotated_r, tMin, tMax, hr)) {
+		vec3 p = hr.p;
+		vec3 normal = hr.normal;
+		p[0] = cos_theta * hr.p[0] + sin_theta * hr.p[2];
+		p[2] = -sin_theta * hr.p[0] + cos_theta * hr.p[2];
+		normal[0] = cos_theta * hr.normal[0] + sin_theta * hr.normal[2];
+		normal[2] = -sin_theta * hr.normal[0] + cos_theta * hr.normal[2];
+		hr.p = p;
+		hr.normal = normal;
+		return true;
+	}
+	else
+		return false;
 }
 //----------------------------------------------Scenes-------------------------------------------------------//
 
@@ -853,7 +943,7 @@ hittable *basicLight() {
 	return new hitList(list, 4);
 }
 hittable *cornellBox() {
-	hittable **list = new hittable*[6];
+	hittable **list = new hittable*[8];
 	int i = 0;
 	material *red = new lambertian(new constant_texture(vec3(0.65, 0.05, 0.05)));
 	material *white = new lambertian(new constant_texture(vec3(0.73, 0.73, 0.73)));
@@ -867,8 +957,8 @@ hittable *cornellBox() {
 	list[i++] = new xzRect(0, 555, 0, 555, 0, white);
 	list[i++] = new flipNorms(new xyRect(0, 555, 0, 555, 555, white));
 
-	list[i++] = new box(vec3(130, 0, 65), vec3(295, 165, 230), white);
-	list[i++] = new box(vec3(265, 0, 295), vec3(430, 330, 460), white);
+	list[i++] = new translate(new rotateY(new box(vec3(0, 0, 0), vec3(165, 165, 165), white), -18),vec3(130, 0, 65));
+	list[i++] = new translate(new rotateY(new box(vec3(0, 0, 0), vec3(165, 330, 165), white), 15),vec3(265, 0, 295));
 
 	return new hitList(list, i);
 }
