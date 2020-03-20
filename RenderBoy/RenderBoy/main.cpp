@@ -43,6 +43,8 @@ public:
 //hittable object info
 struct hitRecord {
 	float t;
+	float u;
+	float v;
 	vec3 p;
 	vec3 normal;
 	material *matPtr;
@@ -100,6 +102,9 @@ public:
 class material {
 public:
 	virtual bool scatter(const ray &r, const hitRecord &hr, vec3 &attenuation, ray &scattered) const = 0;
+	virtual vec3 emitted(float u, float v, const vec3 &p) const {
+		return vec3(0, 0, 0);
+	}
 };
 
 //sphere class 
@@ -265,6 +270,17 @@ public:
 	texture *even;
 };
 
+class diffuseLight : public material {
+public:
+	diffuseLight(texture *a) : emit(a) {}
+	virtual bool scatter(const ray &r, const hitRecord &hr, vec3 &attenuation, ray &scattered) const { return false; }
+	virtual vec3 emitted(float u, float v, const vec3 &p) const {
+		return emit->value(u, v, p);
+	}
+	texture *emit;
+};
+
+
 //this class handles lambertian (diffuse) material
 class lambertian : public material {
 public:
@@ -414,18 +430,21 @@ vec3 colour( const ray &r, hittable *world, int depth) {
 	if (world->hit(r, 0.001, FLT_MAX, hr)) {
 		ray scattered;		
 		vec3 attenuation;
+		vec3 emitted = hr.matPtr->emitted(hr.u, hr.v, hr.p);
 		if (depth < 50 && hr.matPtr->scatter(r, hr, attenuation, scattered)) {
-			return attenuation * colour(scattered, world, depth + 1);
+			return emitted + attenuation * colour(scattered, world, depth + 1);
 		}
 		else {
-			return vec3(0, 0, 0);
+			//return vec3(0, 0, 0);
+			return emitted;
 		}
 		
 	}
 	else {
-		vec3 unitVec = unit_vector(r.direction());
+		/*vec3 unitVec = unit_vector(r.direction());
 		float t = 0.5*(unitVec[1] + 1.0);
-		return (1.0 - t)*vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
+		return (1.0 - t)*vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);*/
+		return vec3(0, 0, 0);
 	}
 	
 }
@@ -604,6 +623,118 @@ public:
 	float scale;
 };
 
+class xyRect : public hittable {
+public:
+	xyRect() {}
+	xyRect(float _x0, float _x1, float _y0, float _y1, float _k, material *mat)
+		: x0(_x0), x1(_x1), y0(_y0), y1(_y1), k(_k), mp(mat) {};
+	virtual bool hit(const ray& r, float t0, float t1, hitRecord& hr) const;
+	virtual bool bounding_box(float t0, float t1, aabb& box) const {
+		box = aabb(vec3(x0, y0, k - 0.0001), vec3(x1, y1, k + 0.0001));
+		return true;
+	}
+	material *mp;
+	float x0, x1, y0, y1, k;
+};
+class xzRect : public hittable {
+public:
+	xzRect() {}
+	xzRect(float _x0, float _x1, float _z0, float _z1, float _k, material *mat)
+		: x0(_x0), x1(_x1), z0(_z0), z1(_z1), k(_k), mp(mat) {};
+	virtual bool hit(const ray& r, float t0, float t1, hitRecord& rec) const;
+	virtual bool bounding_box(float t0, float t1, aabb& box) const {
+		box = aabb(vec3(x0, k - 0.0001, z0), vec3(x1, k + 0.0001, z1));
+		return true;
+	}
+	material *mp;
+	float x0, x1, z0, z1, k;
+};
+class yzRect : public hittable {
+public:
+	yzRect() {}
+	yzRect(float _y0, float _y1, float _z0, float _z1, float _k, material *mat)
+		: y0(_y0), y1(_y1), z0(_z0), z1(_z1), k(_k), mp(mat) {};
+	virtual bool hit(const ray& r, float t0, float t1, hitRecord& hr) const;
+	virtual bool bounding_box(float t0, float t1, aabb& box) const {
+		box = aabb(vec3(k - 0.0001, y0, z0), vec3(k + 0.0001, y1, z1));
+		return true;
+	}
+	material  *mp;
+	float y0, y1, z0, z1, k;
+};
+
+
+
+bool xyRect::hit(const ray& r, float t0, float t1, hitRecord& hr) const {
+	float t = (k - r.origin().z()) / r.direction().z();
+	if (t < t0 || t > t1)
+		return false;
+	float x = r.origin().x() + t * r.direction().x();
+	float y = r.origin().y() + t * r.direction().y();
+	if (x < x0 || x > x1 || y < y0 || y > y1)
+		return false;
+	hr.u = (x - x0) / (x1 - x0);
+	hr.v = (y - y0) / (y1 - y0);
+	hr.t = t;
+	hr.matPtr = mp;
+	hr.p = r.point_at_T(t);
+	hr.normal = vec3(0, 0, 1);
+	return true;
+}
+bool xzRect::hit(const ray& r, float t0, float t1, hitRecord& hr) const {
+	float t = (k - r.origin().y()) / r.direction().y();
+	if (t < t0 || t > t1)
+		return false;
+	float x = r.origin().x() + t * r.direction().x();
+	float z = r.origin().z() + t * r.direction().z();
+	if (x < x0 || x > x1 || z < z0 || z > z1)
+		return false;
+	hr.u = (x - x0) / (x1 - x0);
+	hr.v = (z - z0) / (z1 - z0);
+	hr.t = t;
+	hr.matPtr = mp;
+	hr.p = r.point_at_T(t);
+	hr.normal = vec3(0, 1, 0);
+	return true;
+}
+bool yzRect::hit(const ray& r, float t0, float t1, hitRecord& hr) const {
+	float t = (k - r.origin().x()) / r.direction().x();
+	if (t < t0 || t > t1)
+		return false;
+	float y = r.origin().y() + t * r.direction().y();
+	float z = r.origin().z() + t * r.direction().z();
+	if (y < y0 || y > y1 || z < z0 || z > z1)
+		return false;
+	hr.u = (y - y0) / (y1 - y0);
+	hr.v = (z - z0) / (z1 - z0);
+	hr.t = t;
+	hr.matPtr = mp;
+	hr.p = r.point_at_T(t);
+	hr.normal = vec3(1, 0, 0);
+	return true;
+}
+
+
+class flipNorms : public hittable {
+public:
+	flipNorms(hittable *p): ptr(p){}
+	virtual bool hit(const ray &r,float tMin, float tMax, hitRecord &hr) const {
+		if (ptr->hit(r, tMin, tMax, hr)) {
+			hr.normal = -hr.normal;
+			return true;
+		}
+		else {
+			return false;
+		}
+	}
+
+	virtual bool bounding_box(float t0, float t1, aabb &box) const {
+		return ptr->bounding_box(t0, t1, box);
+	}
+	hittable *ptr;
+};
+
+
 //----------------------------------------------Scenes-------------------------------------------------------//
 
 hittable *randScene() {
@@ -675,14 +806,43 @@ hittable *twoPerlin() {
 	list[1] = new sphere(vec3(0, 2, 0), 2, new lambertian(pertext));
 	return new hitList(list, 2);
 }
+hittable *basicLight() {
 
+	texture *pertext = new noiseTex(4);
+	hittable **list = new hittable*[4];
+	list[0] = new sphere(vec3(0, -1000, 0), 1000, new lambertian(pertext));
+	list[1] = new sphere(vec3(0, 2, 0), 2, new lambertian(pertext));
+	list[2] = new sphere(vec3(0, 7, 0), 2,
+		new diffuseLight(new constant_texture(vec3(4, 4, 4))));
+	list[3] = new xyRect(3, 5, 1, 3, -2,
+		new diffuseLight(new constant_texture(vec3(4, 4, 4))));
+
+	return new hitList(list, 4);
+}
+hittable *cornellBox() {
+	hittable **list = new hittable*[6];
+	int i = 0;
+	material *red = new lambertian(new constant_texture(vec3(0.65, 0.05, 0.05)));
+	material *white = new lambertian(new constant_texture(vec3(0.73, 0.73, 0.73)));
+	material *green = new lambertian(new constant_texture(vec3(0.12, 0.45, 0.15)));
+	material *light = new diffuseLight(new constant_texture(vec3(15, 15, 15)));
+
+	list[i++] = new flipNorms(new yzRect(0, 555, 0, 555, 555, green));
+	list[i++] = new yzRect(0, 555, 0, 555, 0, red);
+	list[i++] = new xzRect(213, 343, 227, 332, 554, light);
+	list[i++] = new flipNorms(new xzRect(0, 555, 0, 555, 555, white));
+	list[i++] = new xzRect(0, 555, 0, 555, 0, white);
+	list[i++] = new flipNorms(new xzRect(0, 555, 0, 555, 555, white));
+
+	return new hitList(list, i);
+}
 //------------------------------------------------------------------------------------------------------------//
 int main() {
 	//screen x,y and sample sizes in terms of pixels
 	int nx = 800;
 	int ny = 600;
 	//the higher the ns value the better the antialiasing but slows down the program 
-	int ns = 25;
+	int ns = 50;
 
 	//open the file 
 	std::ofstream image;
@@ -700,14 +860,15 @@ int main() {
 
 
 	//camera info
-	vec3 lookFrom(13, 2, 3);
-	vec3 lookAt(0, 0, 0);
+	vec3 lookFrom(278, 278, -800);
+	vec3 lookAt(278, 278, 0);
 	float distToFocus = 10.0;
 	float appeture = 0.0;
-	camera cam(lookFrom, lookAt, vec3(0, 1, 0), 20, float(nx) / float(ny),appeture,distToFocus,0.0,1.0);
+	float fov = 40.0;
+	camera cam(lookFrom, lookAt, vec3(0, 1, 0), fov	, float(nx) / float(ny),appeture,distToFocus,0.0,1.0);
 
 	//create the new hit list 
-	hittable *world = twoPerlin();
+	hittable *world = cornellBox();
 	//draw the ppm image 
 	for (int j = ny - 1; j >= 0; j--) {
 		for (int i = 0; i < nx; i++) {
