@@ -858,6 +858,83 @@ bool rotateY::hit(const ray &r, float tMin, float tMax, hitRecord &hr) const {
 	else
 		return false;
 }
+
+class isotropic : public material {
+public:
+	isotropic(texture *a) :albedo(a) {}
+
+	virtual bool scatter(const ray &r, const hitRecord &hr, vec3 &attenuation, ray &scattered)const {
+		scattered = ray(hr.p, randInSphere());
+		attenuation = albedo->value(hr.u, hr.v, hr.p);
+		return true;
+	}
+
+	texture *albedo;
+
+};
+class constantMedium : public hittable {
+public:
+	constantMedium(hittable *b, float d, texture *a) :boundary(b), density(d) {
+		phase = new isotropic(a);
+	}
+
+	virtual bool hit(const ray &r, float tMin, float tMax, hitRecord &hr) const;
+	virtual bool bounding_box(float t0, float t1, aabb &box) const {
+		return boundary->bounding_box(t0, t1, box);
+	}
+
+	hittable *boundary;
+	float density;
+	material *phase;
+		
+};
+bool constantMedium::hit(const ray& r, float t_min, float t_max, hitRecord& rec) const {
+
+	// Print occasional samples when debugging. To enable, set enableDebug true.
+	const bool enableDebug = false;
+	bool debugging = enableDebug && randomDouble() < 0.00001;
+
+	hitRecord rec1, rec2;
+
+	if (boundary->hit(r, -FLT_MAX, FLT_MAX, rec1)) {
+		if (boundary->hit(r, rec1.t + 0.0001, FLT_MAX, rec2)) {
+
+			if (debugging) std::cerr << "\nt0 t1 " << rec1.t << " " << rec2.t << '\n';
+
+			if (rec1.t < t_min)
+				rec1.t = t_min;
+
+			if (rec2.t > t_max)
+				rec2.t = t_max;
+
+			if (rec1.t >= rec2.t)
+				return false;
+
+			if (rec1.t < 0)
+				rec1.t = 0;
+
+			float distance_inside_boundary = (rec2.t - rec1.t)*r.direction().length();
+			float hit_distance = -(1 / density) * log(randomDouble());
+
+			if (hit_distance < distance_inside_boundary) {
+
+				rec.t = rec1.t + hit_distance / r.direction().length();
+				rec.p = r.point_at_T(rec.t);
+
+				if (debugging) {
+					std::cerr << "hit_distance = " << hit_distance << '\n'
+						<< "rec.t = " << rec.t << '\n'
+						<< "rec.p = " << rec.p << '\n';
+				}
+
+				rec.normal = vec3(1, 0, 0);  // arbitrary
+				rec.matPtr = phase;
+				return true;
+			}
+		}
+	}
+	return false;
+}
 //----------------------------------------------Scenes-------------------------------------------------------//
 
 hittable *randScene() {
@@ -962,13 +1039,66 @@ hittable *cornellBox() {
 
 	return new hitList(list, i);
 }
+hittable *accelTest() {
+	material *ground = new lambertian(new constant_texture(vec3(0.48, 0.83, 0.53)));
+	int nb = 20;
+	hittable **list = new hittable*[30];
+	hittable **boxlist = new hittable*[10000];
+	int b = 0;
+	for (int i = 0; i < nb; i++) {
+		for (int j = 0; j < nb; j++) {
+			float w = 100;
+			float x0 = -1000 + i * w;
+			float z0 = -1000 + j * w;
+			float y0 = 0;
+			float x1 = x0 + w;
+			float y1 = 100 * (randomDouble() + 0.01);
+			float z1 = z0 + w;
+			boxlist[b++] = new box(vec3(x0, y0, z0), vec3(x1, y1, z1), ground);
+		}
+	}
+	int l = 0;
+	list[l++] = new bvh_node(boxlist, b, 0, 1);
+	material *light = new diffuseLight(new constant_texture(vec3(7, 7, 7)));
+	list[l++] = new xzRect(123, 423, 147, 412, 554, light);
+	return new hitList(list, l);
+}
+hittable *smokeyCornell() {
+	hittable **list = new hittable*[8];
+	int i = 0;
+	material *red = new lambertian(new constant_texture(vec3(0.65, 0.05, 0.05)));
+	material *white = new lambertian(new constant_texture(vec3(0.73, 0.73, 0.73)));
+	material *green = new lambertian(new constant_texture(vec3(0.12, 0.45, 0.15)));
+	material *light = new diffuseLight(new constant_texture(vec3(7, 7, 7)));
+
+	list[i++] = new flipNorms(new yzRect(0, 555, 0, 555, 555, green));
+	list[i++] = new yzRect(0, 555, 0, 555, 0, red);
+	list[i++] = new xzRect(113, 443, 127, 432, 554, light);
+	list[i++] = new flipNorms(new xzRect(0, 555, 0, 555, 555, white));
+	list[i++] = new xzRect(0, 555, 0, 555, 0, white);
+	list[i++] = new flipNorms(new xyRect(0, 555, 0, 555, 555, white));
+
+	hittable *b1 = new translate(
+		new rotateY(new box(vec3(0, 0, 0), vec3(165, 165, 165), white), -18),
+		vec3(130, 0, 65));
+	hittable *b2 = new translate(
+		new rotateY(new box(vec3(0, 0, 0), vec3(165, 330, 165), white), 15),
+		vec3(265, 0, 295));
+
+	list[i++] = new constantMedium(
+		b1, 0.01, new constant_texture(vec3(1.0, 1.0, 1.0)));
+	list[i++] = new constantMedium(
+		b2, 0.01, new constant_texture(vec3(0.0, 0.0, 0.0)));
+
+	return new hitList(list, i);
+}
 //------------------------------------------------------------------------------------------------------------//
 int main() {
 	//screen x,y and sample sizes in terms of pixels
 	int nx = 800;
 	int ny = 600;
 	//the higher the ns value the better the antialiasing but slows down the program 
-	int ns = 50;
+	int ns = 100;
 
 	//open the file 
 	std::ofstream image;
@@ -994,7 +1124,8 @@ int main() {
 	camera cam(lookFrom, lookAt, vec3(0, 1, 0), fov	, float(nx) / float(ny),appeture,distToFocus,0.0,1.0);
 
 	//create the new hit list 
-	hittable *world = cornellBox();
+	hittable *world = smokeyCornell();
+	
 	//draw the ppm image 
 	for (int j = ny - 1; j >= 0; j--) {
 		for (int i = 0; i < nx; i++) {
