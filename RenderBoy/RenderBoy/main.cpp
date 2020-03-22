@@ -4,18 +4,19 @@ This is my first serious attempt at a raytracer so bare with the code.
 Terrible coding practices are in place cause im lazy
 using the eigen3 library for all linear algebra operations cause I cant 
 be botherd to create my own vector class (NOTE: I added my own vector class anyways)
-preformance isnt an object of concern in this raytracer so if it compiles slow....that's unfortuante  
+preformance isnt an object of concern in this raytracer so if it comM_PIles slow....that's unfortuante  
 this raytracer doesn't leverage the gpu at all its purely cpu based.
 */
 
+#define _USE_MATH_DEFINES
 #include "vec3.h"
 #include <iostream>
 #include <fstream>
 #include <cstdlib>
 #include <cmath>
 #include "perlin.h"
+#include <math.h>
 
-#define PI 3.14159265358979323846
 
 //using namespace Eigen;
 
@@ -39,6 +40,33 @@ public:
 	
 
 };
+
+
+class onb {
+public:
+	onb() {}
+	inline vec3 operator[](int i) const { return axis[i]; }
+	vec3 u() const { return axis[0]; }
+	vec3 v() const { return axis[1]; }
+	vec3 w() const { return axis[2]; }
+
+	vec3 local(float a, float b, float c) const { return a * u() + b * v() + c * w(); }
+	vec3 local(const vec3 &a) const { return a.x()*u() + a.y()*v() + a.z()*w(); }
+	void build_from_w(const vec3 &n);
+
+	vec3 axis[3];
+};
+
+void onb::build_from_w(const vec3 &n) {
+	axis[2] = unit_vector(n);
+	vec3 a;
+	if (fabs(w().x()) > 0.9)
+		a = vec3(0, 1, 0);
+	else
+		a = vec3(1, 0, 0);
+	axis[1] = unit_vector(cross(w(), a));
+	axis[0] = cross(w(), v());
+}
 
 //hittable object info
 struct hitRecord {
@@ -101,9 +129,14 @@ public:
 //base class for all materials
 class material {
 public:
-	virtual bool scatter(const ray &r, const hitRecord &hr, vec3 &attenuation, ray &scattered) const = 0;
-	virtual vec3 emitted(float u, float v, const vec3 &p) const {
+	virtual bool scatter(const ray &r, const hitRecord &hr, vec3 &albedo, ray &scattered, float &pdf) const {
+		return false;
+	}
+	virtual vec3 emitted(const ray &r, const hitRecord &hr, float u, float v, const vec3 &p) const {
 		return vec3(0, 0, 0);
+	}
+	virtual float scatterPDF(const ray &r, const hitRecord &hr, const ray &scattered) const {
+		return 0;
 	}
 };
 
@@ -233,10 +266,8 @@ public:
 vec3 randInSphere() {
 	vec3 p;
 	do {
-
 		p = 2.0*vec3(randomDouble(), randomDouble(), randomDouble()) - vec3(1, 1, 1);
-
-	} while ((p[0] * p[0] + p[1] * p[1] + p[2] * p[2]) >= 1.0);
+	} while (dot(p, p) >= 1.0);
 	return p;
 }
 
@@ -274,22 +305,45 @@ class diffuseLight : public material {
 public:
 	diffuseLight(texture *a) : emit(a) {}
 	virtual bool scatter(const ray &r, const hitRecord &hr, vec3 &attenuation, ray &scattered) const { return false; }
-	virtual vec3 emitted(float u, float v, const vec3 &p) const {
-		return emit->value(u, v, p);
+	virtual vec3 emitted(const ray &r, const hitRecord &hr, float u, float v, const vec3 &p) const {
+		if (dot(hr.normal, r.direction()) < 0.0)
+			return emit->value(u, v, p);
+		else
+			return vec3(0, 0, 0);
 	}
 	texture *emit;
 };
 
+vec3 random_cosine_direction() {
+	float r1 = randomDouble();
+	float r2 = randomDouble();
+	float z = sqrt(1 - r2);
+	float phi = 2 * M_PI*r1;
+	float x = cos(phi)*sqrt(r2);
+	float y = sin(phi)*sqrt(r2);
+	return vec3(x, y, z);
+}
 
 //this class handles lambertian (diffuse) material
 class lambertian : public material {
 public:
 	lambertian(texture *a) : albedo(a) {}
-	virtual bool scatter(const ray &r, const hitRecord &hr, vec3 &attenuation, ray &scattered) const {
-		vec3 target = hr.p + hr.normal + randInSphere();
-		scattered = ray(hr.p, target - hr.p, r.time());
-		attenuation = albedo->value(0,0,hr.p);
-		return true;
+
+	float scatterPDF(const ray &r, const hitRecord &hr, const ray &scattered) const {
+		float cosine = dot(hr.normal, unit_vector(scattered.direction()));
+		if (cosine < 0)
+			return 0;
+		return cosine / M_PI;
+	}
+
+	 bool scatter(const ray &r, const hitRecord &hr, vec3 &alb, ray &scattered, float &pdf) const {
+		 onb uvw;
+		 uvw.build_from_w(hr.normal);
+		 vec3 direction = uvw.local(random_cosine_direction());
+		 scattered = ray(hr.p, unit_vector(direction), r.time());
+		 alb = albedo->value(hr.u, hr.v, hr.p);
+		 pdf = dot(uvw.w(), scattered.direction()) / M_PI;
+		 return true;
 	}
 
 
@@ -430,9 +484,25 @@ vec3 colour( const ray &r, hittable *world, int depth) {
 	if (world->hit(r, 0.001, FLT_MAX, hr)) {
 		ray scattered;		
 		vec3 attenuation;
-		vec3 emitted = hr.matPtr->emitted(hr.u, hr.v, hr.p);
-		if (depth < 50 && hr.matPtr->scatter(r, hr, attenuation, scattered)) {
-			return emitted + attenuation * colour(scattered, world, depth + 1);
+		float pdf;
+		vec3 emitted = hr.matPtr->emitted(r, hr,hr.u, hr.v, hr.p);
+		vec3 albedo;
+		if (depth < 50 && hr.matPtr->scatter(r, hr, albedo, scattered,pdf)) {
+
+			vec3 onLight = vec3(213 + randomDouble()*(343 - 213), 554, 227 + randomDouble()*(332 - 227));
+			vec3 toLight = onLight - hr.p;
+			float distSquared = toLight.squared_length();
+			toLight.make_unit_vector();
+			if (dot(toLight, hr.normal) < 0)
+				return emitted;
+			float lightArea = (343 - 213)*(332 - 227);
+			float lightCos = fabs(toLight.y());
+			if (lightCos < 0.000001)
+				return emitted;
+			pdf = distSquared / (lightCos*lightArea);
+			scattered = ray(hr.p, toLight, r.time());
+
+			return emitted + albedo * hr.matPtr->scatterPDF(r,hr,scattered)*colour(scattered, world, depth + 1) /pdf;
 		}
 		else {
 			//return vec3(0, 0, 0);
@@ -467,7 +537,7 @@ public:
 		time0 = t0;
 		time1 = t1;
 		lensRadius = apeture / 2;
-		float theta = fov * PI / 180;
+		float theta = fov * M_PI / 180;
 		float halfHeight = tan(theta / 2);
 		float halfWidth = aspect * halfHeight;
 		origin = lookFrom;
@@ -809,7 +879,7 @@ public:
 	aabb bbox;
 };
 rotateY::rotateY(hittable *p, float angle) :ptr(p) {
-	float radians = (PI / 180)*angle;
+	float radians = (M_PI / 180)*angle;
 	sin_theta = sin(radians);
 	cos_theta = cos(radians);
 	hasbox = ptr->bounding_box(0, 1, bbox);
@@ -859,9 +929,9 @@ bool rotateY::hit(const ray &r, float tMin, float tMax, hitRecord &hr) const {
 		return false;
 }
 
-class isotropic : public material {
+class isotroM_PIc : public material {
 public:
-	isotropic(texture *a) :albedo(a) {}
+	isotroM_PIc(texture *a) :albedo(a) {}
 
 	virtual bool scatter(const ray &r, const hitRecord &hr, vec3 &attenuation, ray &scattered)const {
 		scattered = ray(hr.p, randInSphere());
@@ -875,7 +945,7 @@ public:
 class constantMedium : public hittable {
 public:
 	constantMedium(hittable *b, float d, texture *a) :boundary(b), density(d) {
-		phase = new isotropic(a);
+		phase = new isotroM_PIc(a);
 	}
 
 	virtual bool hit(const ray &r, float tMin, float tMax, hitRecord &hr) const;
@@ -935,6 +1005,8 @@ bool constantMedium::hit(const ray& r, float t_min, float t_max, hitRecord& rec)
 	}
 	return false;
 }
+
+
 //----------------------------------------------Scenes-------------------------------------------------------//
 
 hittable *randScene() {
@@ -1019,7 +1091,7 @@ hittable *basicLight() {
 
 	return new hitList(list, 4);
 }
-hittable *cornellBox() {
+void cornellBox(hittable **scene, camera **cam, float aspect) {
 	hittable **list = new hittable*[8];
 	int i = 0;
 	material *red = new lambertian(new constant_texture(vec3(0.65, 0.05, 0.05)));
@@ -1029,7 +1101,7 @@ hittable *cornellBox() {
 
 	list[i++] = new flipNorms(new yzRect(0, 555, 0, 555, 555, green));
 	list[i++] = new yzRect(0, 555, 0, 555, 0, red);
-	list[i++] = new xzRect(213, 343, 227, 332, 554, light);
+	list[i++] = new flipNorms(new xzRect(213, 343, 227, 332, 554, light));
 	list[i++] = new flipNorms(new xzRect(0, 555, 0, 555, 555, white));
 	list[i++] = new xzRect(0, 555, 0, 555, 0, white);
 	list[i++] = new flipNorms(new xyRect(0, 555, 0, 555, 555, white));
@@ -1037,8 +1109,16 @@ hittable *cornellBox() {
 	list[i++] = new translate(new rotateY(new box(vec3(0, 0, 0), vec3(165, 165, 165), white), -18),vec3(130, 0, 65));
 	list[i++] = new translate(new rotateY(new box(vec3(0, 0, 0), vec3(165, 330, 165), white), 15),vec3(265, 0, 295));
 
-	return new hitList(list, i);
+	*scene = new hitList(list, i);
+	vec3 lookFrom(278, 278, -800);
+	vec3 lookAt(278, 278, 0);
+	float distToFocus = 10.0;
+	float aperture = 0.0;
+	float fov = 40.0;
+	*cam = new camera(lookFrom, lookAt, vec3(0, 1, 0),fov, aspect, aperture, distToFocus, 0.0, 1.0);
+	
 }
+
 hittable *accelTest() {
 	material *ground = new lambertian(new constant_texture(vec3(0.48, 0.83, 0.53)));
 	int nb = 20;
@@ -1094,11 +1174,11 @@ hittable *smokeyCornell() {
 }
 //------------------------------------------------------------------------------------------------------------//
 int main() {
-	//screen x,y and sample sizes in terms of pixels
-	int nx = 800;
-	int ny = 600;
+	//screen x,y and sample sizes in terms of M_PIxels
+	int nx = 500;
+	int ny = 500;
 	//the higher the ns value the better the antialiasing but slows down the program 
-	int ns = 100;
+	int ns = 10;
 
 	//open the file 
 	std::ofstream image;
@@ -1114,36 +1194,36 @@ int main() {
 	list[3] = new sphere(vec3(-1, 0, -1), 0.5, new dielectric(1.5));
 	list[4] = new sphere(vec3(-1, 0, -1), -0.45, new dielectric(1.5));*/
 
-
-	//camera info
-	vec3 lookFrom(278, 278, -800);
+	/*vec3 lookFrom(278, 278, -800);
 	vec3 lookAt(278, 278, 0);
 	float distToFocus = 10.0;
 	float appeture = 0.0;
 	float fov = 40.0;
-	camera cam(lookFrom, lookAt, vec3(0, 1, 0), fov	, float(nx) / float(ny),appeture,distToFocus,0.0,1.0);
+	camera cam(lookFrom, lookAt, vec3(0, 1, 0), fov, float(nx) / float(ny), appeture, distToFocus, 0.0, 1.0);*/
 
-	//create the new hit list 
-	hittable *world = smokeyCornell();
-	
+	hittable *world;
+	camera *cam;
+	float aspect = float(ny) / float(nx);	
+	cornellBox(&world,&cam,aspect);
 	//draw the ppm image 
 	for (int j = ny - 1; j >= 0; j--) {
 		for (int i = 0; i < nx; i++) {
-			//set color to black  for each pixel initally 
+			//set color to black  for each M_PIxel initally 
 			vec3 col(0, 0, 0);
-			//this loop samples the colour in the pixel
+			//this loop samples the colour in the M_PIxel
 			for (int  s = 0; s < ns; s++)
 			{
 				//get the u,v coords for the ray
 				float u = float(i + randomDouble()) / float(nx);
 				float v = float(j + randomDouble()) / float(ny);
 				//get the ray based on above coords
-				ray r = cam.getRay(u, v);
-				//add all the colors in the pixel 
+				ray r = cam->getRay(u, v);
+				vec3 p = r.point_at_T(2.0);
+				//add all the colors in the M_PIxel 
 				col += colour(r, world,0);
 			}
-			//take the average of the pixel color
-			col /= ns;
+			//take the average of the M_PIxel color
+			col /= float(ns);
 			//gamma correct the image
 			col = vec3(sqrt(col[0]), sqrt(col[1]), sqrt(col[2]));
 			//set the color 
