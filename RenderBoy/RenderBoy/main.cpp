@@ -478,46 +478,6 @@ public:
 };
 
 //color in our scene 
-vec3 colour( const ray &r, hittable *world, int depth) {
-
-	hitRecord hr;
-	if (world->hit(r, 0.001, FLT_MAX, hr)) {
-		ray scattered;		
-		vec3 attenuation;
-		float pdf;
-		vec3 emitted = hr.matPtr->emitted(r, hr,hr.u, hr.v, hr.p);
-		vec3 albedo;
-		if (depth < 50 && hr.matPtr->scatter(r, hr, albedo, scattered,pdf)) {
-
-			vec3 onLight = vec3(213 + randomDouble()*(343 - 213), 554, 227 + randomDouble()*(332 - 227));
-			vec3 toLight = onLight - hr.p;
-			float distSquared = toLight.squared_length();
-			toLight.make_unit_vector();
-			if (dot(toLight, hr.normal) < 0)
-				return emitted;
-			float lightArea = (343 - 213)*(332 - 227);
-			float lightCos = fabs(toLight.y());
-			if (lightCos < 0.000001)
-				return emitted;
-			pdf = distSquared / (lightCos*lightArea);
-			scattered = ray(hr.p, toLight, r.time());
-
-			return emitted + albedo * hr.matPtr->scatterPDF(r,hr,scattered)*colour(scattered, world, depth + 1) /pdf;
-		}
-		else {
-			//return vec3(0, 0, 0);
-			return emitted;
-		}
-		
-	}
-	else {
-		/*vec3 unitVec = unit_vector(r.direction());
-		float t = 0.5*(unitVec[1] + 1.0);
-		return (1.0 - t)*vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);*/
-		return vec3(0, 0, 0);
-	}
-	
-}
 
 //gets a random point in a disk (our camera lens)
 vec3 randUnitInDisk() {
@@ -1006,6 +966,60 @@ bool constantMedium::hit(const ray& r, float t_min, float t_max, hitRecord& rec)
 	return false;
 }
 
+class pdf {
+public: 
+	virtual float value(const vec3 &direction) const = 0;
+	virtual vec3 gen() const = 0;
+};
+
+class cosinePdf : public pdf {
+public:
+	cosinePdf(const vec3& w) { uvw.build_from_w(w); }
+	virtual float value(const vec3& direction) const {
+		float cosine = dot(unit_vector(direction), uvw.w());
+		if (cosine > 0)
+			return cosine / M_PI;
+		else
+			return 0;
+	}
+	virtual vec3 gen() const {
+		return uvw.local(random_cosine_direction());
+	}
+	onb uvw;
+};
+
+
+vec3 colour(const ray &r, hittable *world, int depth) {
+
+	hitRecord hr;
+	if (world->hit(r, 0.001, FLT_MAX, hr)) {
+		ray scattered;
+		vec3 attenuation;
+		float pdf;
+		float pdfVal;
+		vec3 emitted = hr.matPtr->emitted(r, hr, hr.u, hr.v, hr.p);
+		vec3 albedo;
+		if (depth < 50 && hr.matPtr->scatter(r, hr, albedo, scattered, pdf)) {
+			cosinePdf p(hr.normal);
+			scattered = ray(hr.p, p.gen(), r.time());
+			pdfVal = p.value(scattered.direction());
+
+			return emitted + albedo * hr.matPtr->scatterPDF(r, hr, scattered)*colour(scattered, world, depth + 1) / pdfVal;
+		}
+		else {
+			//return vec3(0, 0, 0);
+			return emitted;
+		}
+
+	}
+	else {
+		/*vec3 unitVec = unit_vector(r.direction());
+		float t = 0.5*(unitVec[1] + 1.0);
+		return (1.0 - t)*vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);*/
+		return vec3(0, 0, 0);
+	}
+
+}
 
 //----------------------------------------------Scenes-------------------------------------------------------//
 
